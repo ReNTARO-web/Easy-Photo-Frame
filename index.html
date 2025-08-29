@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>写真フレームエディタ</title>
-  <!-- React & Babel -->
+  <!-- React 17 & Babel -->
   <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -12,29 +12,21 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- html2canvas（保存用） -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <!-- exif-js（写真の撮影データ読み込み用） -->
+  <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; }
-    .editable-text {
-      cursor: text;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .resize-handle {
-      width: 10px; height: 10px;
-      background: #2563eb;
-      position: absolute;
-      right: -5px; bottom: -5px;
-      cursor: se-resize;
-    }
+    .editable-text { cursor: text; white-space: pre-wrap; word-break: break-word; }
+    .layer-panel { max-height: 300px; overflow-y: auto; }
   </style>
 </head>
 <body class="bg-gray-100">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useRef } = React;
+    const { useState, useRef, useEffect } = React;
 
-    // SNS比率
+    // SNS比率リスト
     const aspectRatios = {
       "Instagram (1:1)": [800, 800],
       "Twitter (16:9)": [1280, 720],
@@ -48,30 +40,39 @@
 
     function App() {
       const [ratio, setRatio] = useState("Instagram (1:1)");
-      const [photos, setPhotos] = useState([]);
-      const [texts, setTexts] = useState([
-        { id: 1, content: "ダブルクリックで編集", x: 50, y: 50 }
-      ]);
+      const [objects, setObjects] = useState([]); // 画像＋テキスト共通
       const [editingId, setEditingId] = useState(null);
       const containerRef = useRef(null);
 
       const [cw, ch] = aspectRatios[ratio];
 
-      // 写真アップロード
+      // ファイル読み込み
       const handleUpload = (e) => {
         const files = Array.from(e.target.files);
         files.forEach((file, idx) => {
           if (!file.type.startsWith("image/")) return;
           const url = URL.createObjectURL(file);
-          setPhotos((prev) => [...prev, {
-            id: Date.now()+idx, url, x: 50, y: 100+idx*40, w:300, h:200
-          }]);
+
+          // EXIF読み込み
+          EXIF.getData(file, function() {
+            const make = EXIF.getTag(this, "Make") || "";
+            const model = EXIF.getTag(this, "Model") || "";
+            const iso = EXIF.getTag(this, "ISOSpeedRatings") || "";
+            const exposure = EXIF.getTag(this, "ExposureTime") || "";
+            const focal = EXIF.getTag(this, "FocalLength") || "";
+
+            // 画像オブジェクト
+            setObjects(prev => [
+              ...prev,
+              { id: Date.now()+idx, type:"image", url, x:50, y:50+idx*40, w:300, h:200, visible:true },
+              { id: Date.now()+idx+1000, type:"text", content:`${make} ${model}\nISO ${iso} 露出 ${exposure} レンズ ${focal}`, x:60, y:270+idx*40, visible:true }
+            ]);
+          });
         });
       };
 
       // 保存
       const saveAsImage = async () => {
-        if (!containerRef.current) return;
         const canvas = await html2canvas(containerRef.current, { scale: 2 });
         const link = document.createElement("a");
         link.download = "workspace.png";
@@ -81,73 +82,62 @@
 
       // テキスト変更
       const handleTextChange = (id, value) => {
-        setTexts((prev) => prev.map((t) =>
-          t.id === id ? { ...t, content: value } : t
-        ));
+        setObjects(prev => prev.map(o => o.id===id ? {...o, content:value} : o));
       };
 
       return (
-        <div className="p-4 space-y-4">
-          <h1 className="text-2xl font-bold">写真フレームエディタ</h1>
+        <div className="flex p-4 gap-4">
+          {/* 左：レイヤーパネル */}
+          <div className="w-1/4 bg-white shadow p-2 space-y-2">
+            <h2 className="font-bold">レイヤー</h2>
+            <div className="layer-panel">
+              {objects.map(o=>(
+                <div key={o.id} className="flex justify-between items-center border-b py-1 text-sm">
+                  <span>{o.type==="image" ? "画像" : "テキスト"}</span>
+                  <button className="text-blue-500" onClick={()=>setObjects(prev=>prev.map(x=>x.id===o.id?{...x,visible:!x.visible}:x))}>
+                    {o.visible?"非表示":"表示"}
+                  </button>
+                </div>
+              ))}
+            </div>
 
-          {/* SNS比率ボタン */}
-          <div className="flex flex-wrap gap-2">
-            {Object.keys(aspectRatios).map((r) => (
-              <button key={r} onClick={() => setRatio(r)}
-                className={`px-3 py-1 rounded ${r===ratio ? "bg-blue-500 text-white":"bg-gray-200"}`}>
-                {r}
-              </button>
-            ))}
+            <div>
+              <h3 className="font-bold mt-2">比率変更</h3>
+              {Object.keys(aspectRatios).map(r=>(
+                <button key={r} className={`block w-full text-left px-2 py-1 ${r===ratio?"bg-blue-500 text-white":"bg-gray-100"}`} onClick={()=>setRatio(r)}>
+                  {r}
+                </button>
+              ))}
+            </div>
+
+            <input type="file" accept="image/*" multiple onChange={handleUpload} className="mt-2" />
+            <button onClick={saveAsImage} className="w-full mt-2 px-2 py-1 bg-green-500 text-white rounded">保存</button>
           </div>
 
-          <input type="file" accept="image/*" multiple onChange={handleUpload} />
-
-          <button onClick={saveAsImage} className="px-4 py-2 bg-green-500 text-white rounded">
-            保存
-          </button>
-
-          {/* ワークスペース */}
-          <div ref={containerRef} className="relative bg-white border shadow overflow-hidden"
-            style={{ width:cw, height:ch }}>
-            
-            {/* 写真 */}
-            {photos.map((p) => (
-              <img key={p.id} src={p.url}
-                style={{ position:"absolute", left:p.x, top:p.y, width:p.w, height:p.h }}
-              />
-            ))}
-
-            {/* テキスト */}
-            {texts.map((t) => (
-              editingId === t.id ? (
-                <textarea
-                  key={t.id}
-                  autoFocus
-                  value={t.content}
-                  onChange={(e) => handleTextChange(t.id, e.target.value)}
-                  onBlur={() => setEditingId(null)}
-                  onKeyDown={(e) => { if (e.key === "Enter") setEditingId(null); }}
-                  style={{
-                    position: "absolute",
-                    left: t.x,
-                    top: t.y,
-                    minWidth: "200px",
-                    background: "transparent",
-                    border: "1px dashed gray",
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif"
-                  }}
-                />
-              ) : (
-                <div
-                  key={t.id}
-                  className="editable-text absolute"
-                  style={{ left: t.x, top: t.y }}
-                  onDoubleClick={() => setEditingId(t.id)}
-                >
-                  {t.content}
-                </div>
-              )
-            ))}
+          {/* 中央：編集キャンバス */}
+          <div className="flex-1 flex justify-center items-center overflow-auto">
+            <div ref={containerRef} className="relative bg-white border shadow"
+              style={{ width:cw, height:ch }}>
+              {objects.map(o=> o.visible && (
+                o.type==="image" ? (
+                  <img key={o.id} src={o.url} style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h}}/>
+                ) : editingId===o.id ? (
+                  <textarea key={o.id} autoFocus value={o.content}
+                    onChange={(e)=>handleTextChange(o.id,e.target.value)}
+                    onBlur={()=>setEditingId(null)}
+                    onKeyDown={(e)=>{ if(e.key==="Enter"){e.preventDefault(); setEditingId(null);} }}
+                    style={{position:"absolute",left:o.x,top:o.y,minWidth:"200px",background:"transparent",border:"1px dashed gray",fontFamily:"-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif"}}
+                  />
+                ) : (
+                  <div key={o.id} className="editable-text absolute"
+                    style={{left:o.x,top:o.y,fontFamily:"-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif"}}
+                    onDoubleClick={()=>setEditingId(o.id)}
+                  >
+                    {o.content}
+                  </div>
+                )
+              ))}
+            </div>
           </div>
         </div>
       );
