@@ -1,146 +1,659 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>写真フレームエディタ</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>フレームエディタ（アップグレード）</title>
+
+  <!-- React (UMD) -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- html2canvas for export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
   <style>
-    body { font-family: sans-serif; }
-    .editable-text {
-      cursor: text;
-      white-space: pre-wrap;
-      word-break: break-word;
+    /* 軽いスタイル（Tailwindを使わずシンプルで確実に動くCSS） */
+    :root {
+      --bg:#f5f7fb; --panel:#ffffff; --line:#e6eef8; --accent:#2563eb; --text:#0f172a;
     }
+    html,body,#root{height:100%}
+    body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+    .wrap{max-width:1400px;margin:20px auto;padding:16px;display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;box-shadow:0 1px 4px rgba(8,20,40,0.04)}
+    .h{font-weight:600;margin-bottom:8px}
+    .btn{border:1px solid var(--line);background:#fff;padding:8px 10px;border-radius:8px;cursor:pointer}
+    .btn.primary{background:var(--accent);color:white;border-color:var(--accent)}
+    .small{font-size:13px}
+    .controls{display:flex;flex-wrap:wrap;gap:8px}
+    .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+    input[type="file"]{display:none}
+    .layer-list{max-height:44vh;overflow:auto}
+    .layer-row{display:flex;gap:8px;align-items:center;padding:6px;border-radius:8px}
+    .layer-row.selected{background:#eef6ff}
+    .canvas-wrap{display:flex;flex-direction:column;gap:8px;align-items:center}
+    .canvas-box{position:relative;background:transparent;border-radius:8px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.06)}
+    .grid-bg{background-image:linear-gradient(to right,#e8eff9 1px,transparent 1px),linear-gradient(to bottom,#e8eff9 1px,transparent 1px);background-size:20px 20px}
+    .checker{background:repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/20px 20px}
+    .handle{position:absolute;width:14px;height:14px;background:var(--accent);border-radius:3px;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.15)}
+    .handle.nw{top:-8px;left:-8px;cursor:nwse-resize}
+    .handle.ne{top:-8px;right:-8px;cursor:nesw-resize}
+    .handle.sw{bottom:-8px;left:-8px;cursor:nesw-resize}
+    .handle.se{bottom:-8px;right:-8px;cursor:nwse-resize}
+    .select-ring{outline:3px solid rgba(37,99,235,0.15);box-shadow:0 0 0 4px rgba(37,99,235,0.06) inset}
+    .tooltip{position:fixed;background:#0f172a;color:#fff;padding:6px 8px;border-radius:6px;font-size:13px;pointer-events:none;z-index:9999}
+    .guide-v{position:absolute;width:1px;background:#60a5fa;opacity:0.9;top:0;bottom:0;transform:translateX(-0.5px)}
+    .guide-h{position:absolute;height:1px;background:#60a5fa;opacity:0.9;left:0;right:0;transform:translateY(-0.5px)}
+    .layer-controls{display:flex;gap:8px;flex-wrap:wrap}
+    /* レスポンシブ: 小さい画面なら縦並び */
+    @media (max-width:1024px){ .wrap{grid-template-columns:1fr; padding:12px} .canvas-wrap{align-items:stretch} }
+    textarea.editing {resize:none;border:1px dashed #cbd5e1;background:transparent;padding:6px;border-radius:6px}
   </style>
 </head>
-<body class="bg-gray-100">
+<body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useRef, useEffect } = React;
+  const { useState, useRef, useEffect, useCallback, useMemo } = React;
 
-    // SNS/印刷用の比率リスト
-    const aspectRatios = {
-      "Instagram (1:1)": [800, 800],
-      "Twitter (16:9)": [1280, 720],
-      "YouTube (1280×720)": [1280, 720],
-      "Facebook (1200×630)": [1200, 630],
-      "A4縦 (210×297)": [794, 1123],
-      "A4横 (297×210)": [1123, 794],
-      "汎用 (4:3)": [1024, 768],
-      "汎用 (3:2)": [1200, 800],
+  // プリセット比率（SNS等）
+  const PRESETS = [
+    {label:'Instagram 1:1', w:1080, h:1080},
+    {label:'Story 9:16', w:1080, h:1920},
+    {label:'Reel 4:5', w:1080, h:1350},
+    {label:'X / Twitter 16:9', w:1920, h:1080},
+    {label:'YouTube Thumb 1280x720', w:1280, h:720},
+    {label:'Facebook 1200x630', w:1200, h:630},
+    {label:'Photo 3:2', w:1800, h:1200},
+    {label:'4:3', w:1600, h:1200},
+    {label:'A4 縦', w:2480, h:3508},
+    {label:'A4 横', w:3508, h:2480},
+  ];
+
+  // ユーティリティ
+  const uid = ()=> Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+
+  function useTooltip(){
+    const [tip,setTip] = useState(null);
+    const show = (text, e) => {
+      if(!e) return setTip({text, x:20, y:20});
+      setTip({text, x:e.clientX + 14, y:e.clientY + 12});
+    };
+    const move = (e) => tip && setTip(t => ({...t, x: e.clientX + 14, y: e.clientY + 12}));
+    const hide = ()=> setTip(null);
+    return {tip, show, move, hide};
+  }
+
+  function App(){
+    // canvas size (px)
+    const [canvasSize, setCanvasSize] = useState({w:1080,h:1080});
+    const [gridOn, setGridOn] = useState(true);
+    const [snapOn, setSnapOn] = useState(true);
+
+    // layers: z-order: earlier = back, later = front
+    const [layers, setLayers] = useState([]);
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [editingId, setEditingId] = useState(null);
+
+    // export settings
+    const [exportFormat, setExportFormat] = useState('png');
+    const [exportScale, setExportScale] = useState(1);
+    const [exportQuality, setExportQuality] = useState(0.98);
+
+    const containerRef = useRef(null);
+    const fileRef = useRef(null);
+    const dragRef = useRef(null);
+    const shiftPressed = useRef(false);
+
+    const { tip, show, move, hide } = useTooltip();
+
+    // snap parameters
+    const SNAP_STEP = 10;
+    const SNAP_RANGE = 8;
+
+    // helper: rect representation
+    const rectOf = (l) => ({
+      id: l.id, x: l.x, y: l.y, w: l.width, h: l.height,
+      cx: l.x + l.width/2, cy: l.y + l.height/2,
+      r: l.x + l.width, b: l.y + l.height
+    });
+
+    // add photo layer: default position below last photo
+    const addPhotoLayer = (url, naturalW, naturalH) => {
+      const id = uid();
+      const baseW = Math.min(Math.max(360, Math.round(canvasSize.w * 0.4)), naturalW);
+      const ratio = naturalW / naturalH;
+      const baseH = Math.round(baseW / ratio);
+      // default Y: existing photos bottom + 16
+      const photos = layers.filter(l => l.type === 'photo');
+      const belowY = photos.length > 0 ? Math.max(...photos.map(p => p.y + p.height)) + 16 : 40;
+      const x = 40;
+      const newLayer = {
+        id, type:'photo', name:`Photo ${photos.length+1}`, visible:true,
+        x, y: belowY, width: baseW, height: baseH, url, opacity:1, lock:false
+      };
+      setLayers(prev => [...prev, newLayer]);
+      setSelectedIds([id]);
     };
 
-    function App() {
-      const [ratio, setRatio] = useState("Instagram (1:1)");
-      const [photos, setPhotos] = useState([]);
-      const [texts, setTexts] = useState([
-        { id: 1, content: "ここをダブルクリックして編集", x: 50, y: 50 }
-      ]);
-      const [editingId, setEditingId] = useState(null);
-      const containerRef = useRef(null);
+    // add text layer (placed below last photo)
+    const addTextLayer = (text='ダブルクリックして編集')=>{
+      const id = uid();
+      const photos = layers.filter(l=>l.type==='photo');
+      const belowY = photos.length > 0 ? Math.max(...photos.map(p => p.y + p.height)) + 16 : 40;
+      const layer = {
+        id, type:'text', name:`Text ${layers.filter(l=>l.type==='text').length+1}`,
+        visible:true, x:40, y:belowY, width: Math.min(600, canvasSize.w - 80), height: 60,
+        text, fontSize: 28, lineHeight:1.4, align:'left', weight:600, italic:false, underline:false, color:'#0f172a', opacity:1
+      };
+      setLayers(prev => [...prev, layer]);
+      setSelectedIds([id]);
+    };
 
-      const [cw, ch] = aspectRatios[ratio];
+    // file input handler
+    const onFiles = (e)=>{
+      const files = Array.from(e.target.files || []);
+      files.forEach(f => {
+        if(!f.type.startsWith('image/')) return;
+        const url = URL.createObjectURL(f);
+        const img = new Image();
+        img.onload = ()=> addPhotoLayer(url, img.naturalWidth, img.naturalHeight);
+        img.src = url;
+      });
+      e.target.value = '';
+    };
 
-      // 写真アップロード
-      const handleUpload = (e) => {
-        const files = Array.from(e.target.files);
-        files.forEach((file, idx) => {
-          if (!file.type.startsWith("image/")) return;
-          const url = URL.createObjectURL(file);
-          setPhotos((prev) => [...prev, {
-            id: Date.now()+idx, url, x: 50, y: 100+idx*40, w:300, h:200
-          }]);
+    // compute snap & return moved rect
+    const computeSnap = (moving) => {
+      if(!snapOn) return moving;
+      // build guide lists
+      const others = layers.filter(l => l.id !== moving.id && l.visible).map(rectOf);
+      const guidesX = [0, canvasSize.w/2, canvasSize.w];
+      const guidesY = [0, canvasSize.h/2, canvasSize.h];
+      others.forEach(o => { guidesX.push(o.x, o.cx, o.r); guidesY.push(o.y, o.cy, o.b); });
+      // edges to check
+      const edges = {
+        L: moving.x, CX: moving.x + moving.width/2, R: moving.x + moving.width,
+        T: moving.y, CY: moving.y + moving.height/2, B: moving.y + moving.height
+      };
+      let out = {...moving};
+      const snapVal = (val, list) => {
+        let best = null, diff = Infinity;
+        for(const t of list){
+          const d = Math.abs(val - t);
+          if(d < diff){ diff = d; best = t; }
+        }
+        return (diff <= SNAP_RANGE)? best : null;
+      };
+      // check L / CX / R
+      const sL = snapVal(edges.L, guidesX); if(sL !== null) out.x += (sL - edges.L);
+      const sCX = snapVal(out.x + out.width/2, guidesX); if(sCX !== null) out.x += (sCX - (out.x + out.width/2));
+      const sR = snapVal(out.x + out.width, guidesX); if(sR !== null) out.x += (sR - (out.x + out.width));
+      // check T / CY / B
+      const sT = snapVal(edges.T, guidesY); if(sT !== null) out.y += (sT - edges.T);
+      const sCY = snapVal(out.y + out.height/2, guidesY); if(sCY !== null) out.y += (sCY - (out.y + out.height/2));
+      const sB = snapVal(out.y + out.height, guidesY); if(sB !== null) out.y += (sB - (out.y + out.height));
+      // grid snap to step
+      out.x = Math.round(out.x / SNAP_STEP) * SNAP_STEP;
+      out.y = Math.round(out.y / SNAP_STEP) * SNAP_STEP;
+      out.width = Math.max(10, Math.round(out.width / SNAP_STEP) * SNAP_STEP);
+      out.height = Math.max(8, Math.round(out.height / SNAP_STEP) * SNAP_STEP);
+      // clamp inside canvas
+      out.x = Math.max(0, Math.min(out.x, canvasSize.w - out.width));
+      out.y = Math.max(0, Math.min(out.y, canvasSize.h - out.height));
+      return out;
+    };
+
+    // update a layer by id
+    const updateLayer = (id, patch) => setLayers(prev => prev.map(l => l.id === id ? {...l, ...patch} : l));
+
+    // selection helpers
+    const selectSingle = (id) => setSelectedIds([id]);
+    const toggleSelect = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+    // pointer handling (drag / resize)
+    // dragRef: {mode:'drag'|'resize', corner:'se'.., startX, startY, originLayers, ids, aspect}
+    const onPointerDownLayer = (e, layer, corner=null) => {
+      e.preventDefault(); e.stopPropagation();
+      const multi = e.ctrlKey || e.metaKey || e.shiftKey;
+      if(multi){
+        if(!selectedIds.includes(layer.id)) setSelectedIds(prev => [...prev, layer.id]);
+      } else {
+        setSelectedIds([layer.id]);
+      }
+      const startX = e.clientX, startY = e.clientY;
+      const origin = layers.map(l => ({...l}));
+      const ids = multi ? (selectedIds.includes(layer.id) ? selectedIds : [...selectedIds, layer.id]) : [layer.id];
+      const aspect = layer.width / layer.height;
+      dragRef.current = { mode: corner ? 'resize' : 'drag', corner, startX, startY, origin, ids, aspect, primaryId: layer.id };
+      // capture pointer moves on window
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+    };
+
+    const onPointerMove = (e) => {
+      if(!dragRef.current) return;
+      const d = dragRef.current;
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      if(d.mode === 'drag'){
+        // move all selected by dx/dy relative to origin
+        const base = d.origin;
+        const primaryStart = base.find(l => l.id === d.primaryId) || base[0];
+        // compute snapped primary rect to update guides
+        const attemptPrimary = computeSnap({ ...primaryStart, x: primaryStart.x + dx, y: primaryStart.y + dy, width: primaryStart.width, height: primaryStart.height });
+        const deltaX = attemptPrimary.x - primaryStart.x;
+        const deltaY = attemptPrimary.y - primaryStart.y;
+        setLayers(prev => prev.map(l => {
+          if(d.ids.includes(l.id)){
+            const o = base.find(x => x.id === l.id);
+            return computeSnap({...o, x: o.x + deltaX, y: o.y + deltaY, width: o.width, height: o.height});
+          }
+          return l;
+        }));
+      } else if(d.mode === 'resize'){
+        // Only resize the primary selected item (single-select)
+        if(d.ids.length !== 1) return;
+        const base = d.origin.find(l => l.id === d.ids[0]);
+        if(!base) return;
+        let nx = base.x, ny = base.y, nw = base.width, nh = base.height;
+        const corner = d.corner;
+        if(corner === 'se'){ nw = base.width + dx; nh = base.height + dy; }
+        if(corner === 'ne'){ nw = base.width + dx; nh = base.height - dy; ny = base.y + dy; }
+        if(corner === 'sw'){ nw = base.width - dx; nh = base.height + dy; nx = base.x + dx; }
+        if(corner === 'nw'){ nw = base.width - dx; nh = base.height - dy; nx = base.x + dx; ny = base.y + dy; }
+        // aspect ratio if shift pressed
+        if(shiftPressed.current){
+          const aspect = d.aspect || (base.width/base.height || 1);
+          // preserve aspect by taking larger change
+          const targetW = Math.max(10, nw);
+          const targetH = Math.max(8, Math.round(targetW / aspect));
+          nw = targetW; nh = targetH;
+        }
+        const snapped = computeSnap({ ...base, x: nx, y: ny, width: Math.max(10, nw), height: Math.max(8, nh) });
+        setLayers(prev => prev.map(l => l.id === base.id ? {...l, x: snapped.x, y: snapped.y, width: snapped.width, height: snapped.height} : l));
+      }
+    };
+
+    const onPointerUp = (e) => {
+      dragRef.current = null;
+      // remove global listeners
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+
+    // keyboard handlers
+    useEffect(()=> {
+      const onKeyDown = (e) => {
+        if(e.key === 'Shift') shiftPressed.current = true;
+        if(selectedIds.length === 0) return;
+        const step = e.shiftKey ? 10 : 1;
+        if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+          e.preventDefault();
+          const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+          const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+          setLayers(prev => prev.map(l => selectedIds.includes(l.id) ? computeSnap({...l, x: l.x + dx, y: l.y + dy}) : l));
+        }
+        if((e.key === 'Delete' || e.key === 'Backspace') && e.type === 'keydown'){
+          setLayers(prev => prev.filter(l => !selectedIds.includes(l.id)));
+          setSelectedIds([]);
+        }
+      };
+      const onKeyUp = (e) => { if(e.key === 'Shift') shiftPressed.current = false; };
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
+      return ()=> { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+    }, [selectedIds, snapOn, canvasSize]);
+
+    // bring forward / send backward
+    const bringForward = ()=> {
+      setLayers(prev => {
+        const arr = [...prev];
+        // move selected items one step forward in z-order, preserving order of selection
+        selectedIds.forEach(id => {
+          const i = arr.findIndex(l => l.id === id);
+          if(i >= 0 && i < arr.length - 1){
+            [arr[i], arr[i+1]] = [arr[i+1], arr[i]];
+          }
         });
-      };
+        return arr;
+      });
+    };
+    const sendBackward = ()=> {
+      setLayers(prev => {
+        const arr = [...prev];
+        // move selected items one step backward (process reverse to preserve order)
+        [...selectedIds].reverse().forEach(id => {
+          const i = arr.findIndex(l => l.id === id);
+          if(i > 0){
+            [arr[i], arr[i-1]] = [arr[i-1], arr[i]];
+          }
+        });
+        return arr;
+      });
+    };
 
-      // 保存
-      const saveAsImage = async () => {
-        const canvas = await html2canvas(containerRef.current, { scale: 2 });
-        const link = document.createElement("a");
-        link.download = "workspace.png";
-        link.href = canvas.toDataURL("image/png");
-        link.click();
-      };
+    // align / distribute
+    const align = (mode) => {
+      if(selectedIds.length < 2) return;
+      const sel = layers.filter(l => selectedIds.includes(l.id));
+      const boxL = Math.min(...sel.map(s => s.x));
+      const boxT = Math.min(...sel.map(s => s.y));
+      const boxR = Math.max(...sel.map(s => s.x + s.width));
+      const boxB = Math.max(...sel.map(s => s.y + s.height));
+      const cx = (boxL + boxR)/2;
+      const cy = (boxT + boxB)/2;
+      setLayers(prev => prev.map(l => {
+        if(!selectedIds.includes(l.id)) return l;
+        if(mode === 'left') return {...l, x: boxL};
+        if(mode === 'centerX') return {...l, x: Math.round(cx - l.width/2)};
+        if(mode === 'right') return {...l, x: boxR - l.width};
+        if(mode === 'top') return {...l, y: boxT};
+        if(mode === 'centerY') return {...l, y: Math.round(cy - l.height/2)};
+        if(mode === 'bottom') return {...l, y: boxB - l.height};
+        return l;
+      }));
+    };
 
-      // テキスト更新
-      const handleTextChange = (id, value) => {
-        setTexts((prev) => prev.map((t) =>
-          t.id === id ? { ...t, content: value } : t
-        ));
-      };
+    const distribute = (axis) => {
+      if(selectedIds.length < 3) return;
+      const sel = layers.filter(l => selectedIds.includes(l.id)).sort((a,b) => axis==='x'? a.x - b.x : a.y - b.y);
+      const start = axis==='x' ? sel[0].x : sel[0].y;
+      const end = axis==='x' ? (sel[sel.length-1].x + sel[sel.length-1].width) : (sel[sel.length-1].y + sel[sel.length-1].height);
+      const totalSize = sel.reduce((s, l) => s + (axis==='x' ? l.width : l.height), 0);
+      const gaps = sel.length - 1;
+      const gap = Math.max(0, (end - start - totalSize) / gaps);
+      let pos = start;
+      const positions = {};
+      sel.forEach(l => { positions[l.id] = pos; pos += (axis==='x' ? l.width : l.height) + gap; });
+      setLayers(prev => prev.map(l => selectedIds.includes(l.id) ? (axis==='x' ? {...l, x: Math.round(positions[l.id])} : {...l, y: Math.round(positions[l.id])}) : l));
+    };
 
-      return (
-        <div className="p-6 space-y-4">
-          <h1 className="text-2xl font-bold">📷 写真フレームエディタ</h1>
+    // double-click editing behavior: use textarea overlay for reliable Enter handling
+    const [editingTextValue, setEditingTextValue] = useState('');
+    const [editingRect, setEditingRect] = useState(null);
+    const editingRef = useRef(null);
 
-          {/* コントロール */}
-          <div className="flex flex-wrap gap-2">
-            {Object.keys(aspectRatios).map((r) => (
-              <button key={r} onClick={() => setRatio(r)}
-                className={`px-3 py-1 rounded ${r===ratio ? "bg-blue-500 text-white":"bg-gray-200"}`}>
-                {r}
-              </button>
-            ))}
-          </div>
+    const startEditing = (layer) => {
+      if(layer.type !== 'text') return;
+      setEditingId(layer.id);
+      setEditingTextValue(layer.text);
+      setEditingRect({x: layer.x, y: layer.y, w: layer.width, h: layer.height, fontSize: layer.fontSize});
+      // focus will be handled in effect
+    };
 
-          <input type="file" accept="image/*" multiple onChange={handleUpload} />
+    useEffect(()=> {
+      if(editingId && editingRef.current){
+        editingRef.current.focus();
+        // place caret at end
+        const el = editingRef.current;
+        el.selectionStart = el.value.length;
+        el.selectionEnd = el.value.length;
+      }
+    }, [editingId]);
 
-          <button onClick={saveAsImage} className="px-4 py-2 bg-green-500 text-white rounded">
-            保存
-          </button>
+    const commitEditing = () => {
+      if(!editingId) return;
+      setLayers(prev => prev.map(l => l.id === editingId ? {...l, text: editingTextValue, height: Math.max(30, l.height)} : l));
+      setEditingId(null);
+      setEditingTextValue('');
+      setEditingRect(null);
+    };
 
-          {/* ワークスペース */}
-          <div ref={containerRef} className="relative bg-white border shadow"
-            style={{ width:cw, height:ch }}>
-            
-            {/* 写真配置 */}
-            {photos.map((p) => (
-              <img key={p.id} src={p.url}
-                style={{ position:"absolute", left:p.x, top:p.y, width:p.w, height:p.h }}
-              />
-            ))}
+    // export (compose on offscreen canvas)
+    const exportImage = async () => {
+      const W = Math.round(canvasSize.w * exportScale);
+      const H = Math.round(canvasSize.h * exportScale);
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const ctx = c.getContext('2d');
+      // white background
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,W,H);
+      // draw layers in order
+      for(const l of layers){
+        if(!l.visible) continue;
+        if(l.type === 'photo'){
+          await new Promise(res => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = ()=> { ctx.globalAlpha = l.opacity; ctx.drawImage(img, l.x*exportScale, l.y*exportScale, l.width*exportScale, l.height*exportScale); ctx.globalAlpha = 1; res(); };
+            img.onerror = ()=> res();
+            img.src = l.url;
+          });
+        } else if(l.type === 'text'){
+          ctx.save();
+          ctx.globalAlpha = l.opacity;
+          const size = Math.round(l.fontSize * exportScale);
+          ctx.fillStyle = l.color || '#000';
+          ctx.font = `${l.italic? 'italic ':''}${l.weight || 600} ${size}px -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial`;
+          ctx.textBaseline = 'top';
+          // simple wrapping by words + newlines
+          const maxW = l.width * exportScale;
+          const lines = [];
+          const paragraphs = (l.text || '').split(/\n/);
+          paragraphs.forEach(p => {
+            let words = p.split(' ');
+            let line = '';
+            for(let w of words){
+              const test = line ? (line+' '+w) : w;
+              if(ctx.measureText(test).width > maxW && line){
+                lines.push(line);
+                line = w;
+              } else {
+                line = test;
+              }
+            }
+            lines.push(line);
+          });
+          let y = l.y * exportScale;
+          const lh = Math.round(size * (l.lineHeight || 1.3));
+          for(const line of lines){
+            let x = l.x * exportScale;
+            const w = ctx.measureText(line).width;
+            if(l.align === 'center') x = l.x*exportScale + (maxW - w)/2;
+            if(l.align === 'right') x = l.x*exportScale + (maxW - w);
+            ctx.fillText(line, x, y);
+            if(l.underline){
+              ctx.fillRect(x, y + size*0.85, w, Math.max(1, Math.round(size*0.06)));
+            }
+            y += lh;
+          }
+          ctx.restore();
+        }
+      }
+      const mime = exportFormat === 'png' ? 'image/png' : exportFormat === 'jpeg' ? 'image/jpeg' : 'image/webp';
+      const q = exportFormat === 'png' ? 1 : exportQuality;
+      const data = c.toDataURL(mime, q);
+      const a = document.createElement('a'); a.href = data; a.download = `export.${exportFormat}`; a.click();
+    };
 
-            {/* テキスト配置 */}
-            {texts.map((t) => (
-              editingId === t.id ? (
-                <textarea
-                  key={t.id}
-                  autoFocus
-                  value={t.content}
-                  onChange={(e) => handleTextChange(t.id, e.target.value)}
-                  onBlur={() => setEditingId(null)}
-                  style={{
-                    position: "absolute",
-                    left: t.x,
-                    top: t.y,
-                    minWidth: "200px",
-                    background: "transparent",
-                    border: "1px dashed gray",
-                  }}
-                />
-              ) : (
-                <div
-                  key={t.id}
-                  className="editable-text absolute"
-                  style={{ left: t.x, top: t.y }}
-                  onDoubleClick={() => setEditingId(t.id)}
-                >
-                  {t.content}
+    // initial demo layer
+    useEffect(()=> {
+      if(layers.length === 0){
+        addTextLayer('ダブルクリックでテキスト編集\nEnterで確定、Blurでも確定');
+      }
+      // eslint-disable-next-line
+    }, []);
+
+    // render
+    return (
+      <div style={{padding:16}}>
+        <div style={{maxWidth:1400, margin:'0 auto'}} className="wrap">
+
+          {/* 左パネル */}
+          <div className="card">
+            <div className="h">レイヤー & ツール</div>
+
+            <div className="row">
+              <label className="btn small" onMouseEnter={(e)=>show('画像追加', e)} onMouseMove={move} onMouseLeave={hide}>
+                画像追加
+                <input type="file" accept="image/*" multiple ref={fileRef} onChange={onFiles} />
+              </label>
+              <button className="btn small" onClick={()=>addTextLayer()} onMouseEnter={(e)=>show('テキスト追加', e)} onMouseMove={move} onMouseLeave={hide}>テキスト追加</button>
+            </div>
+
+            <div style={{marginTop:8}} className="layer-list">
+              {layers.map((l, idx) => (
+                <div key={l.id} className={`layer-row card`} style={{display:'flex',alignItems:'center',gap:8, marginBottom:6, border: selectedIds.includes(l.id) ? '1px solid #dbeafe' : '1px solid transparent'}} >
+                  <input type="checkbox" checked={l.visible} onChange={(e)=> updateLayer(l.id, {visible: e.target.checked})} title="表示/非表示" />
+                  <div style={{flex:1, fontSize:13}} title={l.name}>{l.name} ({l.type})</div>
+                  <button className="btn small" onClick={()=> { setSelectedIds([l.id]); }} title="選択" onMouseEnter={(e)=>show('選択', e)} onMouseMove={move} onMouseLeave={hide}>選択</button>
+                  <button className="btn small" onClick={()=> { setLayers(prev => prev.filter(x=> x.id !== l.id)); setSelectedIds([]); }} title="削除" onMouseEnter={(e)=>show('削除', e)} onMouseMove={move} onMouseLeave={hide}>削除</button>
                 </div>
-              )
-            ))}
-          </div>
-        </div>
-      );
-    }
+              ))}
+            </div>
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+            <div style={{height:8}} />
+
+            <div className="h small">プロパティ（選択）</div>
+            {selectedIds.length === 1 ? (() => {
+              const s = layers.find(l => l.id === selectedIds[0]);
+              if(!s) return <div className="small">なし</div>;
+              return (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:13}}>
+                  <label>X<input className="small" type="number" value={s.x} onChange={(e)=> updateLayer(s.id,{x: parseInt(e.target.value || 0)})} /></label>
+                  <label>Y<input className="small" type="number" value={s.y} onChange={(e)=> updateLayer(s.id,{y: parseInt(e.target.value || 0)})} /></label>
+                  <label>幅<input className="small" type="number" value={s.width} onChange={(e)=> updateLayer(s.id,{width: Math.max(10, parseInt(e.target.value||0))})} /></label>
+                  <label>高さ<input className="small" type="number" value={s.height} onChange={(e)=> updateLayer(s.id,{height: Math.max(8, parseInt(e.target.value||0))})} /></label>
+                  <label>不透明度<input className="small" type="range" min="0" max="1" step="0.01" value={s.opacity} onChange={(e)=> updateLayer(s.id,{opacity: parseFloat(e.target.value)})} /></label>
+                  {s.type === 'text' && <>
+                    <label className="col-span-2">テキスト<textarea rows="3" className="small" value={s.text} onChange={(e)=> updateLayer(s.id,{text: e.target.value})} /></label>
+                    <label>サイズ<input className="small" type="number" value={s.fontSize} onChange={(e)=> updateLayer(s.id,{fontSize: parseInt(e.target.value||12)})} /></label>
+                    <label>行間<input className="small" type="number" step="0.1" value={s.lineHeight} onChange={(e)=> updateLayer(s.id,{lineHeight: parseFloat(e.target.value||1.2)})} /></label>
+                    <label>整列<select value={s.align} onChange={(e)=> updateLayer(s.id,{align: e.target.value})}><option value="left">左</option><option value="center">中央</option><option value="right">右</option></select></label>
+                    <label>色<input type="color" value={s.color} onChange={(e)=> updateLayer(s.id,{color: e.target.value})} /></label>
+                    <label><input type="checkbox" checked={s.italic} onChange={(e)=> updateLayer(s.id,{italic: e.target.checked})} />イタリック</label>
+                    <label><input type="checkbox" checked={s.underline} onChange={(e)=> updateLayer(s.id,{underline: e.target.checked})} />下線</label>
+                  </>}
+                </div>
+              );
+            })() : selectedIds.length > 1 ? (
+              <div className="small">{selectedIds.length}件選択中 — 整列・分布を使用してください。</div>
+            ) : <div className="small">レイヤーを選択してください。</div> }
+
+            <div style={{height:8}} />
+
+            <div className="h small">キャンバス</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              <select value={`${canvasSize.w}x${canvasSize.h}`} onChange={(e)=> { const [w,h] = e.target.value.split('x').map(Number); setCanvasSize({w,h}); }}>
+                {PRESETS.map(p => <option key={p.label} value={`${p.w}x${p.h}`}>{p.label}</option>)}
+              </select>
+              <div style={{display:'flex',gap:8}}>
+                <label><input type="checkbox" checked={gridOn} onChange={(e)=> setGridOn(e.target.checked)} /> グリッド</label>
+                <label><input type="checkbox" checked={snapOn} onChange={(e)=> setSnapOn(e.target.checked)} /> スナップ</label>
+              </div>
+            </div>
+
+            <div style={{height:10}} />
+
+            <div className="h small">整列 / 分布</div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <button className="btn small" onClick={()=> align('left')}>左揃え</button>
+              <button className="btn small" onClick={()=> align('centerX')}>中央X</button>
+              <button className="btn small" onClick={()=> align('right')}>右揃え</button>
+              <button className="btn small" onClick={()=> align('top')}>上揃え</button>
+              <button className="btn small" onClick={()=> align('centerY')}>中央Y</button>
+              <button className="btn small" onClick={()=> align('bottom')}>下揃え</button>
+              <button className="btn small" onClick={()=> distribute('x')}>分布X</button>
+              <button className="btn small" onClick={()=> distribute('y')}>分布Y</button>
+            </div>
+
+            <div style={{height:8}} />
+
+            <div className="h small">書き出し</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              <select value={exportFormat} onChange={(e)=> setExportFormat(e.target.value)}><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select>
+              <select value={exportScale} onChange={(e)=> setExportScale(parseFloat(e.target.value))}><option value={1}>1x</option><option value={1.5}>1.5x</option><option value={2}>2x</option><option value={3}>3x</option></select>
+            </div>
+            {exportFormat !== 'png' && <div style={{marginTop:8}}>品質<input type="range" min="0.5" max="1" step="0.01" value={exportQuality} onChange={(e)=> setExportQuality(parseFloat(e.target.value))} /></div>}
+            <div style={{marginTop:8}}>
+              <button className="btn primary" onClick={exportImage} onMouseEnter={(e)=>show('編集ビューのまま書き出し', e)} onMouseMove={move} onMouseLeave={hide}>書き出し</button>
+            </div>
+
+          </div>
+
+          {/* 中央キャンバス */}
+          <div className="canvas-wrap">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+              <div className="small">編集キャンバス — {canvasSize.w}×{canvasSize.h}</div>
+              <div style={{display:'flex',gap:8}}>
+                <div className="small">操作：ドラッグ移動 / 角ハンドルでリサイズ / Shiftで等比 / 矢印で1px（Shiftで10px）</div>
+              </div>
+            </div>
+
+            <div ref={containerRef} className="canvas-box card" style={{width: canvasSize.w, height: canvasSize.h, background:'#fff', position:'relative'}} onPointerDown={(e)=>{ /* 空白クリックで選択解除 */ setSelectedIds([]); }}>
+              {/* grid background */}
+              <div style={{position:'absolute', inset:0}} className={gridOn ? 'grid-bg' : ''} />
+
+              {/* layers (render in order) */}
+              {layers.map((l, idx) => (
+                <div key={l.id}
+                  onPointerDown={(e)=> onPointerDownLayer(e, l)}
+                  style={{
+                    position:'absolute',
+                    left: l.x,
+                    top: l.y,
+                    width: l.width,
+                    height: l.height,
+                    display: l.visible ? 'block' : 'none',
+                    opacity: l.opacity,
+                    zIndex: 100 + idx
+                  }}
+                  className={selectedIds.includes(l.id) ? 'select-ring' : ''}
+                >
+                  {l.type === 'photo' ? (
+                    <img src={l.url} alt={l.name} draggable={false} style={{width:'100%',height:'100%',objectFit:'cover',userSelect:'none',pointerEvents:'none'}} />
+                  ) : (
+                    // Text layer — display mode and edit mode
+                    editingId === l.id ? (
+                      <textarea
+                        ref={editingRef => editingRef && editingRef.focus()}
+                        className="editing"
+                        value={editingTextValue}
+                        onChange={(e)=> setEditingTextValue(e.target.value)}
+                        onBlur={()=> { commitEditing(); }}
+                        onKeyDown={(e)=> {
+                          if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); commitEditing(); }
+                        }}
+                        style={{width:'100%',height:'100%',fontSize: l.fontSize + 'px', lineHeight: l.lineHeight, textAlign: l.align, color: l.color, background:'transparent'}}
+                      />
+                    ) : (
+                      <div
+                        onDoubleClick={(ev) => { ev.stopPropagation(); startEditing(l); }}
+                        style={{width:'100%',height:'100%',fontSize: l.fontSize + 'px', lineHeight: l.lineHeight, textAlign: l.align, color: l.color, whiteSpace:'pre-wrap', overflow:'hidden', cursor:'text', userSelect:'none', padding:6}}
+                      >
+                        {l.text}
+                      </div>
+                    )
+                  )}
+
+                  {/* resize handles (only when single selected and this layer selected) */}
+                  {selectedIds.length === 1 && selectedIds[0] === l.id && (
+                    <>
+                      <div className="handle nw" onPointerDown={(e)=> onPointerDownLayer(e, l, 'nw')}></div>
+                      <div className="handle ne" onPointerDown={(e)=> onPointerDownLayer(e, l, 'ne')}></div>
+                      <div className="handle sw" onPointerDown={(e)=> onPointerDownLayer(e, l, 'sw')}></div>
+                      <div className="handle se" onPointerDown={(e)=> onPointerDownLayer(e, l, 'se')}></div>
+                    </>
+                  )}
+                </div>
+              ))}
+
+              {/* snap guides (optional) — drawn when dragging in computeSnap we didn't keep guides state to keep simpler */}
+            </div>
+          </div>
+
+        </div>
+
+        {/* tooltip */}
+        {tip && <div className="tooltip" style={{left: tip.x, top: tip.y}}>{tip.text}</div>}
+      </div>
+    );
+  }
+
+  // render
+  const root = document.getElementById('root');
+  ReactDOM.createRoot(root).render(React.createElement(App));
   </script>
 </body>
 </html>
