@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ワークスペース編集 & プレビュー | フレームメーカー</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--chrome:#f5f5f7;--panel:#ffffff;--ink:#111827;--muted:#6b7280;--accent:#2563eb;--line:#e5e7eb}
+    html,body{height:100%}
+    body{font-family:'Montserrat',system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;background:var(--chrome);color:var(--ink)}
+    /* Appleっぽい余白＆カード */
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    .btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:.5rem .8rem}
+    .btn-primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+    .btn-ghost{background:transparent}
+    .btn:disabled{opacity:.5}
+    .input, .select{border:1px solid var(--line);border-radius:10px;padding:.5rem .6rem;background:#fff}
+
+    /* キャンバス編集用ハンドル */
+    .handle{position:absolute;width:10px;height:10px;border:1px solid #fff;background:var(--accent);border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.15);}
+    .handle.nw{top:-6px;left:-6px;cursor:nwse-resize}
+    .handle.ne{top:-6px;right:-6px;cursor:nesw-resize}
+    .handle.sw{bottom:-6px;left:-6px;cursor:nesw-resize}
+    .handle.se{bottom:-6px;right:-6px;cursor:nwse-resize}
+
+    .select-ring{outline:2px solid var(--accent)}
+    .no-select{user-select:none}
+
+    /* グリッド */
+    .grid-bg{background-image: linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px); background-size: 20px 20px;}
+
+    /* チェッカーボード（透明プレビューの見やすさ向上） */
+    .checker{background: conic-gradient(#eee 25%, #fff 0 50%, #eee 0 75%, #fff 0) 0 0/20px 20px}
+
+    /* レイヤー行の選択 */
+    .row{border-radius:10px;padding:.4rem .6rem}
+    .row.selected{background:#eef2ff}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const {useState, useRef, useEffect, useCallback, useMemo} = React;
+
+    // 比率プリセット（ワンクリック）
+    const RATIO_PRESETS = [
+      {key:'Post 1:1 (1080)', w:1080, h:1080},
+      {key:'Story 9:16 (1080x1920)', w:1080, h:1920},
+      {key:'Reel 4:5 (1080x1350)', w:1080, h:1350},
+      {key:'X 16:9 (1920x1080)', w:1920, h:1080},
+      {key:'YouTube Thumb 1280x720', w:1280, h:720},
+      {key:'X Header 1500x500', w:1500, h:500},
+      {key:'汎用 4:3 (1600x1200)', w:1600, h:1200},
+      {key:'写真 3:2 (1800x1200)', w:1800, h:1200},
+      {key:'A4 縦 2480x3508', w:2480, h:3508},
+      {key:'A4 横 3508x2480', w:3508, h:2480},
+    ];
+
+    // レイヤー型: photo | text
+    // 各layer: { id, type, name, visible, x, y, width, height, url?(photo), text?(text), fontSize, color, opacity }
+
+    function App(){
+      const [canvasSize, setCanvasSize] = useState({w:1080, h:1080});
+      const [layers, setLayers] = useState([]); // 下が背面、上が前面
+      const [selectedId, setSelectedId] = useState(null);
+      const [showGrid, setShowGrid] = useState(true);
+      const [snap, setSnap] = useState(true);
+      const [exportFormat, setExportFormat] = useState('png');
+      const [exportQuality, setExportQuality] = useState(0.98); // jpeg/webp用
+      const [exportScale, setExportScale] = useState(1); // 書き出しスケール
+
+      const editorRef = useRef(null);
+      const fileRef = useRef(null);
+
+      // シンプルなEXIF代替テキスト（ユーザー要望: テキストのみ・アイコン禁止）
+      const [metaText, setMetaText] = useState({
+        camera: 'Camera Model | 24-70mm f/2.8',
+        settings: '50mm | f/2.8 | 1/125s | ISO 800',
+        datetime: new Date().toLocaleString('ja-JP')
+      });
+
+      // --- ユーティリティ ---
+      const addPhotoLayer = (url, naturalWidth, naturalHeight)=>{
+        const id = crypto.randomUUID();
+        const startW = Math.min(480, naturalWidth);
+        const ratio = naturalWidth / naturalHeight;
+        const startH = Math.round(startW / ratio);
+        setLayers(prev=>[...prev,{
+          id, type:'photo', name:`写真 ${prev.filter(l=>l.type==='photo').length+1}`,
+          visible:true, x:40+prev.length*12, y:40+prev.length*12, width:startW, height:startH, url,
+          opacity:1
+        }]);
+        setSelectedId(id);
+      };
+
+      const addTextLayer = (text)=>{
+        const id = crypto.randomUUID();
+        setLayers(prev=>[...prev,{
+          id, type:'text', name:`テキスト ${prev.filter(l=>l.type==='text').length+1}`,
+          visible:true, x:60+prev.length*8, y:60+prev.length*8, width:360, height:40,
+          text, fontSize:18, color:'#111827', opacity:1
+        }]);
+        setSelectedId(id);
+      };
+
+      const removeLayer = (id)=> setLayers(prev=>prev.filter(l=>l.id!==id));
+      const bringForward = (id)=> setLayers(prev=>{
+        const idx = prev.findIndex(l=>l.id===id); if(idx===-1||idx===prev.length-1) return prev;
+        const arr=[...prev]; [arr[idx], arr[idx+1]]=[arr[idx+1], arr[idx]]; return arr;
+      });
+      const sendBackward = (id)=> setLayers(prev=>{
+        const idx = prev.findIndex(l=>l.id===id); if(idx<=0) return prev;
+        const arr=[...prev]; [arr[idx], arr[idx-1]]=[arr[idx-1], arr[idx]]; return arr;
+      });
+
+      const updateLayer = (id, patch)=> setLayers(prev=>prev.map(l=> l.id===id? {...l, ...patch}: l));
+
+      // --- 画像読み込み ---
+      const onFilesChange = (e)=>{
+        const files = Array.from(e.target.files||[]);
+        files.forEach(file=>{
+          if(!file.type.startsWith('image/')) return;
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.onload = ()=> addPhotoLayer(url, img.naturalWidth, img.naturalHeight);
+          img.src = url;
+        });
+        e.target.value = '';
+      };
+
+      // --- スナップ（グリッド＆他オブジェクトの辺） ---
+      const snapValue = (val, step)=> Math.round(val/step)*step;
+      const SNAP_STEP = 10; const SNAP_RANGE = 6;
+
+      const applySnap = (moving)=>{
+        if(!snap) return moving;
+        // グリッド
+        let {x,y,width,height} = moving; 
+        x = snapValue(x, SNAP_STEP); y = snapValue(y, SNAP_STEP);
+        width = Math.max(10, snapValue(width, SNAP_STEP));
+        height = Math.max(10, snapValue(height, SNAP_STEP));
+        // 簡易: 他レイヤーの左/右/上/下に吸着
+        const others = layers.filter(l=>l.id!==moving.id && l.visible);
+        const edges = (r)=>({L:r.x, R:r.x+r.width, T:r.y, B:r.y+r.height});
+        const me = edges({x,y,width,height});
+        others.forEach(o=>{
+          const e = edges(o);
+          [['L','L','x'],['L','R','x'],['R','L','x'],['R','R','x']].forEach(([a,b,axis])=>{
+            const da = (a==='L'?me.L:me.R) - (b==='L'?e.L:e.R);
+            if(Math.abs(da)<=SNAP_RANGE){
+              if(axis==='x'){
+                if(a==='L') x -= da; else x -= da; // 左右を合わせる
+              }
+            }
+          });
+          [['T','T','y'],['T','B','y'],['B','T','y'],['B','B','y']].forEach(([a,b,axis])=>{
+            const da = (a==='T'?me.T:me.B) - (b==='T'?e.T:e.B);
+            if(Math.abs(da)<=SNAP_RANGE){ if(axis==='y'){ if(a==='T') y -= da; else y -= da; } }
+          });
+        });
+        return {...moving, x,y,width,height};
+      };
+
+      // --- ドラッグ＆リサイズ ---
+      const dragState = useRef(null);
+
+      const onMouseDownLayer = (e, layer, corner=null)=>{
+        e.stopPropagation();
+        setSelectedId(layer.id);
+        const startX = e.clientX, startY = e.clientY;
+        dragState.current = { mode: corner? 'resize':'drag', corner, startX, startY, start: {...layer} };
+      };
+
+      const onMouseMoveEditor = (e)=>{
+        if(!dragState.current || !selectedId) return;
+        const l = layers.find(l=>l.id===selectedId); if(!l) return;
+        const {mode, corner, startX, startY, start} = dragState.current;
+        const dx = e.clientX - startX; const dy = e.clientY - startY;
+        if(mode==='drag'){
+          const moved = applySnap({ ...l, x:start.x + dx, y:start.y + dy });
+          updateLayer(l.id, { x:moved.x, y:moved.y });
+        } else {
+          let nx=start.x, ny=start.y, nw=start.width, nh=start.height;
+          if(corner==='se'){ nw = Math.max(10, start.width + dx); nh = Math.max(10, start.height + dy); }
+          if(corner==='ne'){ nw = Math.max(10, start.width + dx); nh = Math.max(10, start.height - dy); ny = start.y + dy; }
+          if(corner==='sw'){ nw = Math.max(10, start.width - dx); nh = Math.max(10, start.height + dy); nx = start.x + dx; }
+          if(corner==='nw'){ nw = Math.max(10, start.width - dx); nh = Math.max(10, start.height - dy); nx = start.x + dx; ny = start.y + dy; }
+          const sized = applySnap({ ...l, x:nx, y:ny, width:nw, height:nh });
+          updateLayer(l.id, { x:sized.x, y:sized.y, width:sized.width, height:sized.height });
+        }
+      };
+      const onMouseUpEditor = ()=>{ dragState.current=null; };
+
+      // エディタ空クリックで選択解除
+      const onBlankClick = ()=> setSelectedId(null);
+
+      // --- 透明背景の編集ビュー（ワークスペース）とガイド非表示のビュースペース（出力見た目） ---
+      const EditorCanvas = () => (
+        <div className="relative no-select border rounded-xl overflow-hidden card" style={{width:canvasSize.w/2, height:canvasSize.h/2}} onMouseMove={onMouseMoveEditor} onMouseUp={onMouseUpEditor}>
+          <div className={`absolute inset-0 ${showGrid? 'grid-bg':''} checker`} onMouseDown={onBlankClick}></div>
+          {layers.map(layer=> layer.visible && (
+            <div key={layer.id}
+                 className={`absolute ${selectedId===layer.id? 'select-ring':''}`}
+                 style={{left:layer.x/2, top:layer.y/2, width:layer.width/2, height:layer.height/2, opacity:layer.opacity}}
+                 onMouseDown={(e)=>onMouseDownLayer(e, layer)}>
+              {layer.type==='photo' && (
+                <img src={layer.url} draggable={false} className="w-full h-full object-cover" />
+              )}
+              {layer.type==='text' && (
+                <div className="w-full h-full" style={{
+                  color:layer.color, fontSize:(layer.fontSize/2)+'px', lineHeight:1.3, background:'transparent'
+                }}>{layer.text}</div>
+              )}
+              {selectedId===layer.id && (
+                <>
+                  <div className="handle nw" onMouseDown={(e)=>onMouseDownLayer(e, layer, 'nw')}></div>
+                  <div className="handle ne" onMouseDown={(e)=>onMouseDownLayer(e, layer, 'ne')}></div>
+                  <div className="handle sw" onMouseDown={(e)=>onMouseDownLayer(e, layer, 'sw')}></div>
+                  <div className="handle se" onMouseDown={(e)=>onMouseDownLayer(e, layer, 'se')}></div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+
+      const ViewCanvas = () => (
+        <div className="relative card border rounded-xl overflow-hidden" style={{width:canvasSize.w/2, height:canvasSize.h/2}}>
+          <div className="absolute inset-0 bg-white"></div>
+          {layers.map(layer=> layer.visible && (
+            <div key={layer.id} className="absolute" style={{left:layer.x/2, top:layer.y/2, width:layer.width/2, height:layer.height/2, opacity:layer.opacity}}>
+              {layer.type==='photo' && (<img src={layer.url} draggable={false} className="w-full h-full object-cover" />)}
+              {layer.type==='text' && (
+                <div style={{color:layer.color, fontSize:(layer.fontSize/2)+'px', lineHeight:1.3, background:'transparent'}}>{layer.text}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+
+      // --- 高画質書き出し（オフスクリーンCanvasで合成・PNG(可逆)/JPEG/WebP対応） ---
+      const exportImage = async ()=>{
+        const w = Math.round(canvasSize.w * exportScale);
+        const h = Math.round(canvasSize.h * exportScale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0,0,w,h);
+        // 背景は白（透明が良ければコメントアウト）
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0,0,w,h);
+
+        // レイヤー順に描画
+        for(const layer of layers){
+          if(!layer.visible) continue;
+          if(layer.type==='photo'){
+            await new Promise(res=>{
+              const img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.onload = ()=>{ ctx.globalAlpha = layer.opacity; ctx.drawImage(img, layer.x*exportScale, layer.y*exportScale, layer.width*exportScale, layer.height*exportScale); ctx.globalAlpha = 1; res(); };
+              img.src = layer.url;
+            });
+          } else if(layer.type==='text'){
+            ctx.save();
+            ctx.globalAlpha = layer.opacity; 
+            ctx.fillStyle = layer.color; 
+            ctx.font = `${Math.round(layer.fontSize*exportScale)}px Montserrat, sans-serif`;
+            // width/heightは枠ではなく編集の目安なので折返し簡易対応
+            const words = (layer.text+'').split('\n');
+            let y = (layer.y*exportScale) + (layer.fontSize*exportScale);
+            words.forEach(line=>{ ctx.fillText(line, layer.x*exportScale, y); y += layer.fontSize*exportScale*1.3; });
+            ctx.restore();
+          }
+        }
+
+        const type = ({png:'image/png', jpeg:'image/jpeg', webp:'image/webp'})[exportFormat] || 'image/png';
+        const q = exportFormat==='png'? 1 : exportQuality; // PNGは無圧縮
+        const data = canvas.toDataURL(type, q);
+        const a = document.createElement('a'); a.href = data; a.download = `export.${exportFormat}`; a.click();
+      };
+
+      // 初期テキストレイヤー（メタ情報）
+      useEffect(()=>{
+        if(layers.length===0){
+          addTextLayer(metaText.camera);
+          addTextLayer(metaText.settings);
+          addTextLayer(metaText.datetime);
+        }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      },[]);
+
+      const selected = layers.find(l=>l.id===selectedId) || null;
+
+      return (
+        <div className="p-6">
+          <div className="max-w-[1400px] mx-auto grid grid-cols-[320px,1fr,1fr] gap-6 items-start">
+            {/* 左: サイドバー（レイヤー/プロパティ） */}
+            <aside className="card p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">レイヤー</h2>
+                <button className="btn" onClick={()=>fileRef.current.click()}>画像追加</button>
+                <input type="file" accept="image/*" multiple className="hidden" ref={fileRef} onChange={onFilesChange}/>
+              </div>
+
+              {/* レイヤーリスト（上が前面） */}
+              <div className="space-y-1">
+                {layers.map((l, i)=> (
+                  <div key={l.id} className={`row flex items-center gap-2 border border-transparent ${selectedId===l.id? 'selected border-indigo-200':''}`}>
+                    <input type="checkbox" checked={l.visible} onChange={(e)=>updateLayer(l.id,{visible:e.target.checked})} title="表示/非表示"/>
+                    <button className="btn" onClick={()=>sendBackward(l.id)} title="下へ">下</button>
+                    <button className="btn" onClick={()=>bringForward(l.id)} title="上へ">上</button>
+                    <button className="btn" onClick={()=>setSelectedId(l.id)} title="選択">選択</button>
+                    <div className="truncate" title={l.name}>{l.name}（{l.type}）</div>
+                    <button className="btn" onClick={()=>removeLayer(l.id)} title="削除">削除</button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="h-px bg-gray-200"/>
+
+              <div className="space-y-3">
+                <h3 className="font-medium">プロパティ</h3>
+                {selected? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-sm text-gray-600 col-span-1">X
+                      <input className="input w-full" type="number" value={selected.x} onChange={e=>updateLayer(selected.id,{x:parseInt(e.target.value||0)})}/>
+                    </label>
+                    <label className="text-sm text-gray-600 col-span-1">Y
+                      <input className="input w-full" type="number" value={selected.y} onChange={e=>updateLayer(selected.id,{y:parseInt(e.target.value||0)})}/>
+                    </label>
+                    <label className="text-sm text-gray-600 col-span-1">幅
+                      <input className="input w-full" type="number" value={selected.width} onChange={e=>updateLayer(selected.id,{width:Math.max(10,parseInt(e.target.value||0))})}/>
+                    </label>
+                    <label className="text-sm text-gray-600 col-span-1">高さ
+                      <input className="input w-full" type="number" value={selected.height} onChange={e=>updateLayer(selected.id,{height:Math.max(10,parseInt(e.target.value||0))})}/>
+                    </label>
+                    <label className="text-sm text-gray-600 col-span-2">不透明度
+                      <input className="w-full" type="range" min="0" max="1" step="0.01" value={selected.opacity} onChange={e=>updateLayer(selected.id,{opacity:parseFloat(e.target.value)})}/>
+                    </label>
+                    {selected.type==='text' && (
+                      <>
+                        <label className="text-sm text-gray-600 col-span-2">テキスト
+                          <textarea className="input w-full" rows="3" value={selected.text} onChange={e=>updateLayer(selected.id,{text:e.target.value})}></textarea>
+                        </label>
+                        <label className="text-sm text-gray-600 col-span-1">文字サイズ
+                          <input className="input w-full" type="number" value={selected.fontSize} onChange={e=>updateLayer(selected.id,{fontSize:Math.max(8,parseInt(e.target.value||12))})}/>
+                        </label>
+                        <label className="text-sm text-gray-600 col-span-1">文字色
+                          <input className="input w-full" type="color" value={selected.color} onChange={e=>updateLayer(selected.id,{color:e.target.value})}/>
+                        </label>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500">レイヤーを選択してください</div>
+                )}
+              </div>
+
+              <div className="h-px bg-gray-200"/>
+
+              <div className="space-y-3">
+                <h3 className="font-medium">ワークスペース</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-sm text-gray-600 col-span-1">幅
+                    <input className="input w-full" type="number" value={canvasSize.w} onChange={e=>setCanvasSize(s=>({...s,w:Math.max(100,parseInt(e.target.value||0))}))}/>
+                  </label>
+                  <label className="text-sm text-gray-600 col-span-1">高さ
+                    <input className="input w-full" type="number" value={canvasSize.h} onChange={e=>setCanvasSize(s=>({...s,h:Math.max(100,parseInt(e.target.value||0))}))}/>
+                  </label>
+                  <label className="text-sm text-gray-600 col-span-2">プリセット
+                    <select className="select w-full" value={`${canvasSize.w}x${canvasSize.h}`} onChange={(e)=>{ const [w,h]=e.target.value.split('x').map(Number); setCanvasSize({w,h}); }}>
+                      {RATIO_PRESETS.map(p=> <option key={p.key} value={`${p.w}x${p.h}`}>{p.key}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={showGrid} onChange={e=>setShowGrid(e.target.checked)}/>グリッド</label>
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/>スナップ</label>
+                </div>
+              </div>
+
+              <div className="h-px bg-gray-200"/>
+
+              <div className="space-y-3">
+                <h3 className="font-medium">書き出し</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-sm text-gray-600">形式
+                    <select className="select w-full" value={exportFormat} onChange={e=>setExportFormat(e.target.value)}>
+                      <option value="png">PNG（可逆・高画質）</option>
+                      <option value="jpeg">JPEG（品質指定）</option>
+                      <option value="webp">WebP（品質指定）</option>
+                    </select>
+                  </label>
+                  <label className="text-sm text-gray-600">スケール
+                    <select className="select w-full" value={exportScale} onChange={e=>setExportScale(parseFloat(e.target.value))}>
+                      <option value="1">1x（等倍）</option>
+                      <option value="1.5">1.5x</option>
+                      <option value="2">2x</option>
+                      <option value="3">3x</option>
+                    </select>
+                  </label>
+                  {(exportFormat!=='png') && (
+                    <label className="text-sm text-gray-600 col-span-2">画質（{Math.round(exportQuality*100)}%）
+                      <input type="range" min="0.5" max="1" step="0.01" value={exportQuality} onChange={e=>setExportQuality(parseFloat(e.target.value))} className="w-full" />
+                    </label>
+                  )}
+                </div>
+                <button className="btn btn-primary w-full" onClick={exportImage}>書き出し</button>
+              </div>
+            </aside>
+
+            {/* 中: 編集ワークスペース */}
+            <section className="space-y-3">
+              <h2 className="text-sm text-gray-500">編集ワークスペース</h2>
+              <div ref={editorRef} className="relative" style={{width:canvasSize.w/2, height:canvasSize.h/2}} onMouseMove={onMouseMoveEditor} onMouseUp={onMouseUpEditor}>
+                <EditorCanvas/>
+              </div>
+              <div className="flex gap-2">
+                <button className="btn" onClick={()=>addTextLayer('新しいテキスト')}>テキスト追加</button>
+              </div>
+            </section>
+
+            {/* 右: ビュースペース（最終出力見た目） */}
+            <section className="space-y-3">
+              <h2 className="text-sm text-gray-500">ビュースペース（出力イメージ）</h2>
+              <ViewCanvas/>
+            </section>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App/>, document.getElementById('root'));
+  </script>
+</body>
+</html>
+
