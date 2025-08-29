@@ -1,672 +1,159 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>SNS対応 フレームエディタ（EXIF対応）</title>
-
-<!-- React UMD -->
-<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-<!-- EXIF reader (exifr) -->
-<script src="https://unpkg.com/exifr/dist/full.umd.js"></script>
-
-<!-- html2canvas fallback (not used for final high-quality export, but available for previews) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-
-<style>
-  :root{
-    --bg:#f6f8fb; --panel:#ffffff; --line:#e6eef8; --accent:#2563eb; --text:#0f172a;
-  }
-  html,body,#root{height:100%}
-  body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Segoe UI",Roboto,Arial;color:var(--text);-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1400px;margin:18px auto;padding:16px;display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(8,20,40,0.04)}
-  .h{font-weight:700;margin-bottom:8px}
-  .btn{border:1px solid var(--line);background:#fff;padding:8px 10px;border-radius:8px;cursor:pointer}
-  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .small{font-size:13px}
-  .controls{display:flex;flex-wrap:wrap;gap:8px}
-  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
-  input[type="file"]{display:none}
-  .layer-list{max-height:42vh;overflow:auto}
-  .layer-row{display:flex;gap:8px;align-items:center;padding:8px;border-radius:8px}
-  .layer-row.selected{background:#eef6ff}
-  .canvas-area{display:flex;flex-direction:column;gap:8px;align-items:center}
-  .frame-box{position:relative;border-radius:10px;overflow:hidden;background:#fff;box-shadow:0 8px 28px rgba(8,20,40,0.06)}
-  .grid-bg{background-image:linear-gradient(to right,#eef6fb 1px,transparent 1px),linear-gradient(to bottom,#eef6fb 1px,transparent 1px);background-size:20px 20px}
-  .handle{position:absolute;width:14px;height:14px;background:var(--accent);border-radius:3px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.12)}
-  .handle.nw{top:-8px;left:-8px;cursor:nwse-resize}
-  .handle.ne{top:-8px;right:-8px;cursor:nesw-resize}
-  .handle.sw{bottom:-8px;left:-8px;cursor:nesw-resize}
-  .handle.se{bottom:-8px;right:-8px;cursor:nwse-resize}
-  .selection-ring{outline:3px solid rgba(37,99,235,0.12);box-shadow:0 0 0 6px rgba(37,99,235,0.04) inset}
-  .tooltip{position:fixed;background:var(--text);color:#fff;padding:6px 8px;border-radius:6px;font-size:13px;pointer-events:none;z-index:9999}
-  .guide-v{position:absolute;width:1px;background:#60a5fa;opacity:0.95;top:0;bottom:0;transform:translateX(-0.5px)}
-  .guide-h{position:absolute;height:1px;background:#60a5fa;opacity:0.95;left:0;right:0;transform:translateY(-0.5px)}
-  textarea.editing{resize:none;border:1px dashed #cbd5e1;background:transparent;padding:6px;border-radius:6px;font-family:inherit}
-  .preset-btn{padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer}
-  .preset-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-  @media (max-width:1024px){ .wrap{grid-template-columns:1fr;padding:12px} .canvas-area{align-items:stretch} }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>写真フレームエディタ</title>
+  <!-- React & Babel -->
+  <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- html2canvas（保存用） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; }
+    .editable-text {
+      cursor: text;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .resize-handle {
+      width: 10px; height: 10px;
+      background: #2563eb;
+      position: absolute;
+      right: -5px; bottom: -5px;
+      cursor: se-resize;
+    }
+  </style>
 </head>
-<body>
-<div id="root"></div>
+<body class="bg-gray-100">
+  <div id="root"></div>
 
-<script type="text/babel">
-const {useState,useEffect,useRef,useMemo} = React;
-const exifr = window.exifr;
+  <script type="text/babel">
+    const { useState, useRef } = React;
 
-const PRESETS = [
-  {key:'instagram', label:'Instagram 1:1', w:1080, h:1080},
-  {key:'story', label:'Story 9:16', w:1080, h:1920},
-  {key:'reel', label:'Reel 4:5', w:1080, h:1350},
-  {key:'x', label:'Twitter/X 16:9', w:1920, h:1080},
-  {key:'youtube', label:'YouTube Thumb 1280x720', w:1280, h:720},
-  {key:'facebook', label:'Facebook 1200x630', w:1200, h:630},
-  {key:'photo32', label:'Photo 3:2', w:1800, h:1200},
-  {key:'four3', label:'4:3', w:1600, h:1200},
-  {key:'a4p', label:'A4 縦', w:2480, h:3508},
-  {key:'a4l', label:'A4 横', w:3508, h:2480},
-];
-
-const uid = ()=> Date.now().toString(36) + Math.random().toString(36).slice(2,8);
-
-function useTooltip(){
-  const [tip,setTip] = useState(null);
-  const show = (text,e) => { if(!e) return setTip({text,x:20,y:20}); setTip({text,x:e.clientX+12,y:e.clientY+12}); };
-  const move = (e) => tip && setTip(t=>({...t,x:e.clientX+12,y:e.clientY+12}));
-  const hide = ()=> setTip(null);
-  return {tip,show,move,hide};
-}
-
-function App(){
-  // canvas logical size (internal)
-  const [canvasSize, setCanvasSize] = useState({w:1080,h:1080});
-  const [presetKey, setPresetKey] = useState('instagram');
-
-  // ui/behavior
-  const [gridOn, setGridOn] = useState(true);
-  const [snapOn, setSnapOn] = useState(true);
-
-  // layers: array ordered back->front
-  const [layers, setLayers] = useState([]);
-  const [selected, setSelected] = useState([]); // selected ids
-  const [editingId, setEditingId] = useState(null); // id currently editing text
-  const [editingValue, setEditingValue] = useState('');
-  const [editingRect, setEditingRect] = useState(null);
-
-  const containerRef = useRef(null);
-  const fileRef = useRef(null);
-  const dragRef = useRef(null);
-  const shiftRef = useRef(false);
-  const tooltip = useTooltip();
-
-  const [displayScale, setDisplayScale] = useState(1);
-
-  const SNAP_STEP = 10;
-  const SNAP_RANGE = 8;
-
-  useEffect(()=>{
-    // ensure preset sync
-    const p = PRESETS.find(p=>p.key===presetKey);
-    if(p) setCanvasSize({w:p.w,h:p.h});
-  },[presetKey]);
-
-  // scale canvas to fit screen for editing (display only)
-  useEffect(()=>{
-    const updateScale = ()=>{
-      const maxW = Math.round(window.innerWidth * 0.86);
-      const maxH = Math.round(window.innerHeight * 0.78);
-      const s = Math.min(1, maxW / canvasSize.w, maxH / canvasSize.h);
-      setDisplayScale(s);
+    // SNS比率
+    const aspectRatios = {
+      "Instagram (1:1)": [800, 800],
+      "Twitter (16:9)": [1280, 720],
+      "YouTube (1280×720)": [1280, 720],
+      "Facebook (1200×630)": [1200, 630],
+      "A4縦 (210×297)": [794, 1123],
+      "A4横 (297×210)": [1123, 794],
+      "汎用 (4:3)": [1024, 768],
+      "汎用 (3:2)": [1200, 800],
     };
-    updateScale();
-    window.addEventListener('resize', updateScale);
-    return ()=> window.removeEventListener('resize', updateScale);
-  },[canvasSize]);
 
-  useEffect(()=>{
-    // set initial helper text layer
-    if(layers.length === 0){
-      addText('ダブルクリックで編集 — Enterで確定、Shift+Enterで改行');
-    }
-    // eslint-disable-next-line
-  },[]);
+    function App() {
+      const [ratio, setRatio] = useState("Instagram (1:1)");
+      const [photos, setPhotos] = useState([]);
+      const [texts, setTexts] = useState([
+        { id: 1, content: "ダブルクリックで編集", x: 50, y: 50 }
+      ]);
+      const [editingId, setEditingId] = useState(null);
+      const containerRef = useRef(null);
 
-  // helpers
-  const rectOf = (l) => ({id:l.id,x:l.x,y:l.y,w:l.width,h:l.height,cx:l.x+l.width/2,cy:l.y+l.height/2,r:l.x+l.width,b:l.y+l.height});
+      const [cw, ch] = aspectRatios[ratio];
 
-  const clamp = (r) => {
-    const w = Math.max(1, Math.round(r.width));
-    const h = Math.max(1, Math.round(r.height));
-    let x = Math.round(r.x), y = Math.round(r.y);
-    x = Math.max(0, Math.min(x, canvasSize.w - w));
-    y = Math.max(0, Math.min(y, canvasSize.h - h));
-    return {...r, x, y, width:w, height:h};
-  };
-
-  // compute snap: snaps edges/centers to canvas edges/center and other layers edges/centers
-  const computeSnap = (moving) => {
-    if(!snapOn) return clamp(moving);
-    const others = layers.filter(l=> l.id !== moving.id && l.visible).map(rectOf);
-    const guidesX = [0, canvasSize.w/2, canvasSize.w];
-    const guidesY = [0, canvasSize.h/2, canvasSize.h];
-    others.forEach(o => { guidesX.push(o.x, o.cx, o.r); guidesY.push(o.y, o.cy, o.b); });
-    const edges = {L:moving.x, CX:moving.x + moving.width/2, R:moving.x + moving.width, T:moving.y, CY:moving.y + moving.height/2, B:moving.y + moving.height};
-    let out = {...moving};
-    const nearest = (val, list) => {
-      let best=null, diff=Infinity;
-      for(const t of list){ const d = Math.abs(val - t); if(d < diff){ diff = d; best = t; } }
-      return (diff <= SNAP_RANGE) ? best : null;
-    };
-    const sL = nearest(edges.L, guidesX); if(sL!==null) out.x += (sL - edges.L);
-    const sCX = nearest(out.x + out.width/2, guidesX); if(sCX!==null) out.x += (sCX - (out.x + out.width/2));
-    const sR = nearest(out.x + out.width, guidesX); if(sR!==null) out.x += (sR - (out.x + out.width));
-    const sT = nearest(edges.T, guidesY); if(sT!==null) out.y += (sT - edges.T);
-    const sCY = nearest(out.y + out.height/2, guidesY); if(sCY!==null) out.y += (sCY - (out.y + out.height/2));
-    const sB = nearest(out.y + out.height, guidesY); if(sB!==null) out.y += (sB - (out.y + out.height));
-    // snap to grid
-    out.x = Math.round(out.x / SNAP_STEP) * SNAP_STEP;
-    out.y = Math.round(out.y / SNAP_STEP) * SNAP_STEP;
-    out.width = Math.max(10, Math.round(out.width / SNAP_STEP) * SNAP_STEP);
-    out.height = Math.max(8, Math.round(out.height / SNAP_STEP) * SNAP_STEP);
-    return clamp(out);
-  };
-
-  // layer ops
-  const addPhoto = (url, natW, natH) => {
-    const id = uid();
-    const baseW = Math.min(Math.max(360, Math.round(canvasSize.w*0.45)), natW || Math.round(canvasSize.w * 0.6));
-    const ratio = (natW && natH) ? natW / natH : (16/9);
-    const baseH = Math.round(baseW / ratio);
-    const photos = layers.filter(l=> l.type === 'photo');
-    const belowY = photos.length > 0 ? Math.max(...photos.map(p=> p.y + p.height)) + 16 : 40;
-    const l = { id, type:'photo', name:`Photo ${photos.length+1}`, visible:true, x:40, y:belowY, width: baseW, height: baseH, url, opacity:1 };
-    setLayers(prev => [...prev, l]);
-    setSelected([id]);
-  };
-
-  const addText = (text = 'ダブルクリックで編集') => {
-    const id = uid();
-    const photos = layers.filter(l=> l.type==='photo');
-    const belowY = photos.length > 0 ? Math.max(...photos.map(p=> p.y + p.height)) + 16 : 40;
-    const l = { id, type:'text', name:`Text ${layers.filter(l=>l.type==='text').length+1}`, visible:true, x:40, y:belowY, width: Math.min(600, canvasSize.w - 80), height: 60, text, fontSize:28, lineHeight:1.4, align:'left', weight:600, italic:false, underline:false, color:'#0f172a', opacity:1 };
-    setLayers(prev => [...prev, l]);
-    setSelected([id]);
-  };
-
-  // file input -> exif parse + add
-  const onFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
-    for(const f of files){
-      if(!f.type.startsWith('image/')) continue;
-      const url = URL.createObjectURL(f);
-      // read exif
-      let exif = {};
-      try {
-        exif = await exifr.parse(f) || {};
-      } catch(err){
-        exif = {};
-      }
-      const natW = exif.ExifImageWidth || exif.PixelXDimension || 0;
-      const natH = exif.ExifImageHeight || exif.PixelYDimension || 0;
-      addPhoto(url, natW, natH);
-      // Also create text layer from exif (if any useful fields)
-      const cam = exif.Make && exif.Model ? `${exif.Make} ${exif.Model}` : (exif.Model || '');
-      const lens = exif.LensModel || exif.Lens || '';
-      const focal = exif.FocalLength ? (typeof exif.FocalLength === 'object' ? exif.FocalLength.value : exif.FocalLength) : '';
-      const aperture = exif.FNumber || exif.ApertureValue || '';
-      const shutter = exif.ExposureTime || exif.ShutterSpeedValue || '';
-      const iso = exif.ISO || exif.ISOSpeedRatings || '';
-      const dt = exif.DateTimeOriginal || exif.CreateDate || exif.ModifyDate || '';
-      const parts = [];
-      if(cam) parts.push(cam);
-      if(lens) parts.push(lens);
-      const settings = [];
-      if(focal) settings.push(`${focal}mm`);
-      if(aperture) settings.push(`f/${aperture}`);
-      if(shutter) settings.push(`${shutter}s`);
-      if(iso) settings.push(`ISO ${iso}`);
-      const metaText = [parts.join(' | '), settings.join(' | '), dt].filter(Boolean).join('\n');
-      if(metaText){
-        // add metadata text layer below the photo we just added
-        addText(metaText);
-      }
-    }
-    e.target.value = '';
-  };
-
-  // selection helpers
-  const selectSingle = (id, e) => {
-    if(e && (e.ctrlKey || e.metaKey || e.shiftKey)){
-      setSelected(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
-    } else {
-      setSelected([id]);
-    }
-  };
-
-  // drag / resize
-  const onPointerDownLayer = (e, layer, corner = null) => {
-    e.preventDefault(); e.stopPropagation();
-    const multi = e.ctrlKey || e.metaKey || e.shiftKey;
-    if(multi){
-      if(!selected.includes(layer.id)) setSelected(prev => [...prev, layer.id]);
-    } else {
-      setSelected([layer.id]);
-    }
-    const origin = layers.map(l => ({...l}));
-    dragRef.current = { mode: corner ? 'resize' : 'drag', corner, startX: e.clientX, startY: e.clientY, origin, ids: multi ? (selected.includes(layer.id) ? selected : [...selected, layer.id]) : [layer.id], primaryId: layer.id, aspect: layer.width / layer.height };
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-  };
-
-  const onPointerMove = (e) => {
-    if(!dragRef.current) return;
-    const d = dragRef.current;
-    const dx = e.clientX - d.startX;
-    const dy = e.clientY - d.startY;
-    if(d.mode === 'drag'){
-      const origin = d.origin;
-      const prim = origin.find(l => l.id === d.primaryId) || origin[0];
-      const attempt = computeSnap({...prim, x: prim.x + dx, y: prim.y + dy, width: prim.width, height: prim.height});
-      const deltaX = attempt.x - prim.x;
-      const deltaY = attempt.y - prim.y;
-      setLayers(prev => prev.map(layer => {
-        if(d.ids.includes(layer.id)){
-          const o = origin.find(x=>x.id === layer.id);
-          return computeSnap({...o, x: o.x + deltaX, y: o.y + deltaY, width: o.width, height: o.height});
-        }
-        return layer;
-      }));
-    } else if(d.mode === 'resize'){
-      if(d.ids.length !== 1) return;
-      const base = d.origin.find(l => l.id === d.ids[0]);
-      if(!base) return;
-      let nx = base.x, ny = base.y, nw = base.width, nh = base.height;
-      const c = d.corner;
-      if(c === 'se'){ nw = base.width + dx; nh = base.height + dy; }
-      if(c === 'ne'){ nw = base.width + dx; nh = base.height - dy; ny = base.y + dy; }
-      if(c === 'sw'){ nw = base.width - dx; nh = base.height + dy; nx = base.x + dx; }
-      if(c === 'nw'){ nw = base.width - dx; nh = base.height - dy; nx = base.x + dx; ny = base.y + dy; }
-      if(shiftRef.current){
-        const aspect = d.aspect || (base.width/base.height || 1);
-        nw = Math.max(10, nw);
-        nh = Math.max(8, Math.round(nw / aspect));
-      }
-      const snapped = computeSnap({...base, x:nx, y:ny, width: Math.max(10, nw), height: Math.max(8, nh)});
-      setLayers(prev => prev.map(l => l.id === base.id ? {...l, x: snapped.x, y: snapped.y, width: snapped.width, height: snapped.height} : l));
-    }
-  };
-
-  const onPointerUp = () => {
-    dragRef.current = null;
-    window.removeEventListener('pointermove', onPointerMove);
-    window.removeEventListener('pointerup', onPointerUp);
-  };
-
-  // keyboard shortcuts (move with arrows, delete)
-  useEffect(()=>{
-    const onKey = (e) => {
-      if(e.key === 'Shift'){ shiftRef.current = true; }
-      // avoid handling shortcuts while editing text
-      const active = document.activeElement;
-      const editingActive = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
-      if(editingActive) return;
-      if(selected.length === 0) return;
-      const step = e.shiftKey ? 10 : 1;
-      if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
-        e.preventDefault();
-        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
-        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-        setLayers(prev => prev.map(l => selected.includes(l.id) ? computeSnap({...l, x: l.x + dx, y: l.y + dy}) : l));
-      }
-      if((e.key === 'Backspace' || e.key === 'Delete') && !editingActive){
-        // delete selected layers
-        setLayers(prev => prev.filter(l => !selected.includes(l.id)));
-        setSelected([]);
-      }
-    };
-    const onKeyUp = (e) => { if(e.key === 'Shift') shiftRef.current = false; };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('keyup', onKeyUp);
-    return ()=> { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
-  },[selected, layers, snapOn]);
-
-  // align/distribute (with snapping)
-  const align = (mode) => {
-    if(selected.length < 1) return;
-    const sel = layers.filter(l => selected.includes(l.id));
-    const left = Math.min(...sel.map(s=>s.x));
-    const top = Math.min(...sel.map(s=>s.y));
-    const right = Math.max(...sel.map(s=> s.x + s.width));
-    const bottom = Math.max(...sel.map(s=> s.y + s.height));
-    const cx = (left + right)/2;
-    const cy = (top + bottom)/2;
-    setLayers(prev => prev.map(l => {
-      if(!selected.includes(l.id)) return l;
-      if(mode === 'left') return computeSnap({...l, x: left});
-      if(mode === 'centerX') return computeSnap({...l, x: Math.round(cx - l.width/2)});
-      if(mode === 'right') return computeSnap({...l, x: Math.round(right - l.width)});
-      if(mode === 'top') return computeSnap({...l, y: top});
-      if(mode === 'centerY') return computeSnap({...l, y: Math.round(cy - l.height/2)});
-      if(mode === 'bottom') return computeSnap({...l, y: Math.round(bottom - l.height)});
-      return l;
-    }));
-  };
-
-  const distribute = (axis) => {
-    if(selected.length < 3) return;
-    const sel = layers.filter(l=> selected.includes(l.id)).sort((a,b)=> axis==='x'? a.x - b.x : a.y - b.y);
-    const start = axis==='x' ? sel[0].x : sel[0].y;
-    const end = axis==='x' ? (sel[sel.length-1].x + sel[sel.length-1].width) : (sel[sel.length-1].y + sel[sel.length-1].height);
-    const totalSize = sel.reduce((s,l)=> s + (axis==='x'? l.width: l.height), 0);
-    const gaps = sel.length - 1;
-    const gap = Math.max(0, (end - start - totalSize) / gaps);
-    let pos = start;
-    const positions = {};
-    sel.forEach(l => { positions[l.id] = pos; pos += (axis==='x'? l.width: l.height) + gap; });
-    setLayers(prev => prev.map(l => selected.includes(l.id) ? (axis==='x'? computeSnap({...l, x: Math.round(positions[l.id])}) : computeSnap({...l, y: Math.round(positions[l.id])})) : l));
-  };
-
-  // double-click editing: overlay textarea for Enter commit / Shift+Enter newline / blur commit
-  const [editingValueLocal, setEditingValueLocal] = useState('');
-  const editingRef = useRef(null);
-
-  const startEditing = (layer) => {
-    if(layer.type !== 'text') return;
-    setEditingId(layer.id);
-    setEditingValueLocal(layer.text || '');
-    setEditingRect({x: layer.x, y: layer.y, w: layer.width, h: layer.height, fontSize: layer.fontSize});
-    setSelected([layer.id]);
-    setTimeout(()=> { if(editingRef.current) editingRef.current.focus(); }, 0);
-  };
-
-  const commitEditing = () => {
-    if(!editingId) return;
-    setLayers(prev => prev.map(l => l.id === editingId ? {...l, text: editingValueLocal} : l));
-    setEditingId(null);
-    setEditingValueLocal('');
-    setEditingRect(null);
-  };
-
-  // export: draw to offscreen canvas at chosen scale
-  const exportImage = async (format='png', scale=1, quality=0.98) => {
-    const W = Math.round(canvasSize.w * scale), H = Math.round(canvasSize.h * scale);
-    const cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
-    const ctx = cvs.getContext('2d');
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,W,H);
-    for(const l of layers){
-      if(!l.visible) continue;
-      if(l.type === 'photo'){
-        await new Promise(res=>{
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = ()=> { ctx.globalAlpha = l.opacity; ctx.drawImage(img, l.x*scale, l.y*scale, l.width*scale, l.height*scale); ctx.globalAlpha = 1; res(); };
-          img.onerror = ()=> res();
-          img.src = l.url;
+      // 写真アップロード
+      const handleUpload = (e) => {
+        const files = Array.from(e.target.files);
+        files.forEach((file, idx) => {
+          if (!file.type.startsWith("image/")) return;
+          const url = URL.createObjectURL(file);
+          setPhotos((prev) => [...prev, {
+            id: Date.now()+idx, url, x: 50, y: 100+idx*40, w:300, h:200
+          }]);
         });
-      } else if(l.type === 'text'){
-        ctx.save();
-        ctx.globalAlpha = l.opacity;
-        const size = Math.round((l.fontSize || 28) * scale);
-        ctx.fillStyle = l.color || '#000';
-        ctx.font = `${l.italic ? 'italic ' : ''}${l.weight || 600} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-        ctx.textBaseline = 'top';
-        const maxW = l.width * scale;
-        const paras = (l.text || '').split('\n');
-        const lines = [];
-        paras.forEach(p=>{
-          let words = p.split(' ');
-          let line = '';
-          for(const w of words){
-            const test = line ? (line + ' ' + w) : w;
-            if(ctx.measureText(test).width > maxW && line){ lines.push(line); line = w; } else { line = test; }
-          }
-          lines.push(line);
-        });
-        let y = l.y * scale;
-        const lh = Math.round(size * (l.lineHeight || 1.3));
-        for(const line of lines){
-          let x = l.x * scale;
-          const w = ctx.measureText(line).width;
-          if(l.align === 'center') x = l.x * scale + (maxW - w)/2;
-          if(l.align === 'right') x = l.x * scale + (maxW - w);
-          ctx.fillText(line, x, y);
-          if(l.underline) ctx.fillRect(x, y + size*0.85, w, Math.max(1, Math.round(size*0.06)));
-          y += lh;
-        }
-        ctx.restore();
-      }
-    }
-    const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
-    const q = format === 'png' ? 1 : quality;
-    const data = cvs.toDataURL(mime, q);
-    const a = document.createElement('a'); a.href = data; a.download = `frame_export.${format}`; a.click();
-  };
+      };
 
-  // UI rendering
-  return (
-    <div style={{padding:14}}>
-      <div className="wrap">
-        {/* LEFT: controls & layers */}
-        <div className="card">
-          <div className="h">レイヤー & ツール</div>
+      // 保存
+      const saveAsImage = async () => {
+        if (!containerRef.current) return;
+        const canvas = await html2canvas(containerRef.current, { scale: 2 });
+        const link = document.createElement("a");
+        link.download = "workspace.png";
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      };
 
-          <div className="row controls" style={{marginBottom:10}}>
-            <label className="btn small" onMouseEnter={(e)=>tooltip.show('画像を追加',e)} onMouseMove={tooltip.move} onMouseLeave={tooltip.hide}>
-              画像追加
-              <input type="file" accept="image/*" multiple ref={fileRef} onChange={onFiles} />
-            </label>
-            <button className="btn small" onClick={()=> addText()} onMouseEnter={(e)=>tooltip.show('テキストを追加',e)} onMouseMove={tooltip.move} onMouseLeave={tooltip.hide}>テキスト追加</button>
-          </div>
+      // テキスト変更
+      const handleTextChange = (id, value) => {
+        setTexts((prev) => prev.map((t) =>
+          t.id === id ? { ...t, content: value } : t
+        ));
+      };
 
-          <div style={{marginBottom:10}}>
-            <div className="small" style={{marginBottom:6}}>プリセット（ワンクリックでキャンバス切替）</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-              {PRESETS.map(p=> <button key={p.key} className={`preset-btn ${p.key===presetKey ? 'active':''}`} onClick={()=> setPresetKey(p.key)}>{p.label}</button>)}
-            </div>
-          </div>
+      return (
+        <div className="p-4 space-y-4">
+          <h1 className="text-2xl font-bold">写真フレームエディタ</h1>
 
-          <div style={{marginTop:8}} className="layer-list">
-            {layers.map((l, i)=>(
-              <div key={l.id} className={`layer-row`} style={{border: selected.includes(l.id) ? '1px solid rgba(37,99,235,0.12)' : '1px solid transparent', marginBottom:6}}>
-                <input type="checkbox" checked={l.visible} onChange={(e)=> setLayers(prev => prev.map(x=> x.id===l.id ? {...x, visible: e.target.checked} : x))} />
-                <div style={{flex:1,fontSize:13}} title={l.name}>{l.name} ({l.type})</div>
-                <button className="btn small" onClick={(e)=> selectSingle(l.id, e)}>選択</button>
-                <button className="btn small" onClick={()=> setLayers(prev => prev.filter(x=>x.id !== l.id))}>削除</button>
-              </div>
+          {/* SNS比率ボタン */}
+          <div className="flex flex-wrap gap-2">
+            {Object.keys(aspectRatios).map((r) => (
+              <button key={r} onClick={() => setRatio(r)}
+                className={`px-3 py-1 rounded ${r===ratio ? "bg-blue-500 text-white":"bg-gray-200"}`}>
+                {r}
+              </button>
             ))}
           </div>
 
-          <div style={{height:8}}></div>
+          <input type="file" accept="image/*" multiple onChange={handleUpload} />
 
-          <div className="h small">プロパティ（選択）</div>
-          {selected.length === 1 ? (()=> {
-            const s = layers.find(x=> x.id === selected[0]);
-            if(!s) return <div className="small">なし</div>;
-            return (
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:13}}>
-                <label>X<input value={s.x} type="number" onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, x: parseInt(e.target.value||0)} : l))} /></label>
-                <label>Y<input value={s.y} type="number" onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, y: parseInt(e.target.value||0)} : l))} /></label>
-                <label>幅<input value={s.width} type="number" onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, width: Math.max(10, parseInt(e.target.value||0))} : l))} /></label>
-                <label>高さ<input value={s.height} type="number" onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, height: Math.max(8, parseInt(e.target.value||0))} : l))} /></label>
-                <label>不透明度<input type="range" min="0" max="1" step="0.01" value={s.opacity} onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, opacity: parseFloat(e.target.value)} : l))} /></label>
+          <button onClick={saveAsImage} className="px-4 py-2 bg-green-500 text-white rounded">
+            保存
+          </button>
 
-                {s.type === 'text' && <>
-                  <label className="col-span-2">テキスト<textarea rows="3" value={s.text} onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, text: e.target.value} : l))} /></label>
-                  <label>サイズ<input type="number" value={s.fontSize} onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, fontSize: parseInt(e.target.value||12)} : l))} /></label>
-                  <label>行間<input type="number" step="0.1" value={s.lineHeight} onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, lineHeight: parseFloat(e.target.value||1.2)} : l))} /></label>
-                  <label>整列<select value={s.align} onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, align: e.target.value} : l))}><option value="left">左</option><option value="center">中央</option><option value="right">右</option></select></label>
-                  <label>色<input type="color" value={s.color} onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, color: e.target.value} : l))} /></label>
-                  <label><input type="checkbox" checked={s.italic} onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, italic: e.target.checked} : l))} /> イタリック</label>
-                  <label><input type="checkbox" checked={s.underline} onChange={(e)=> setLayers(prev => prev.map(l=> l.id===s.id ? {...l, underline: e.target.checked} : l))} /> 下線</label>
-                </>}
-              </div>
-            );
-          })() : selected.length > 1 ? <div className="small">{selected.length}件選択 — 整列 / 分布 を使用</div> : <div className="small">レイヤーを選択してください</div> }
-
-          <div style={{height:10}}></div>
-
-          <div className="h small">整列 / 分布</div>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            <button className="btn small" onClick={()=> align('left')}>左揃え</button>
-            <button className="btn small" onClick={()=> align('centerX')}>中央X</button>
-            <button className="btn small" onClick={()=> align('right')}>右揃え</button>
-            <button className="btn small" onClick={()=> align('top')}>上揃え</button>
-            <button className="btn small" onClick={()=> align('centerY')}>中央Y</button>
-            <button className="btn small" onClick={()=> align('bottom')}>下揃え</button>
-            <button className="btn small" onClick={()=> distribute('x')}>分布X</button>
-            <button className="btn small" onClick={()=> distribute('y')}>分布Y</button>
-          </div>
-
-          <div style={{height:10}}></div>
-
-          <div className="h small">書き出し</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-            <select id="fmt"><option value="png">PNG（無劣化）</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select>
-            <select id="scale"><option value="1">1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="3">3x</option></select>
-          </div>
-          <div style={{marginTop:8}}>
-            <button className="btn primary" onClick={()=>{
-              const f = document.getElementById('fmt').value;
-              const s = parseFloat(document.getElementById('scale').value);
-              exportImage(f, s, 0.98);
-            }}>書き出し</button>
-          </div>
-        </div>
-
-        {/* RIGHT: canvas */}
-        <div className="canvas-area">
-          <div style={{display:'flex',justifyContent:'space-between',width:'100%'}}>
-            <div className="small">キャンバス — {canvasSize.w} × {canvasSize.h}</div>
-            <div className="small">操作：ドラッグ移動 / 角ハンドルでリサイズ / Shiftで等比 / 矢印で1px（Shiftで10px）</div>
-          </div>
-
-          <div className="frame-box" style={{width: canvasSize.w * displayScale, height: canvasSize.h * displayScale, transformOrigin:'top left', transform:`scale(${displayScale})`}} ref={containerRef} onPointerDown={()=> setSelected([])}>
-            {/* grid */}
-            <div style={{position:'absolute',left:0,top:0,width:canvasSize.w,height:canvasSize.h}} className={gridOn ? 'grid-bg' : ''} />
-
-            {/* layers */}
-            {layers.map((l, idx) => (
-              <div key={l.id} onPointerDown={(e)=> onPointerDownLayer(e, l)} style={{position:'absolute', left: l.x, top: l.y, width: l.width, height: l.height, display: l.visible ? 'block' : 'none', opacity: l.opacity, zIndex: 100 + idx, transformOrigin:'top left'}} className={selected.includes(l.id) ? 'selection-ring' : ''}>
-                {l.type === 'photo' ? (
-                  <img src={l.url} alt={l.name} draggable={false} style={{width:'100%',height:'100%',objectFit:'cover',userSelect:'none',pointerEvents:'none'}} />
-                ) : (
-                  (editingId === l.id) ? (
-                    <textarea ref={editingRef} className="editing" value={editingValueLocal} onChange={(e)=> setEditingValueLocal(e.target.value)} onBlur={()=> commitEditing()} onKeyDown={(e)=> { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); commitEditing(); } }} style={{width:'100%',height:'100%',fontSize: l.fontSize + 'px', lineHeight: l.lineHeight, textAlign: l.align, color: l.color, background:'transparent'}} />
-                  ) : (
-                    <div onDoubleClick={(ev)=> { ev.stopPropagation(); startEditing(l); }} style={{width:'100%',height:'100%',fontSize: l.fontSize + 'px', lineHeight: l.lineHeight, textAlign: l.align, color: l.color, whiteSpace:'pre-wrap', overflow:'hidden', cursor:'text', padding:6}}>
-                      {l.text}
-                    </div>
-                  )
-                )}
-                {/* resize handles if single selected */}
-                {selected.length === 1 && selected[0] === l.id && (
-                  <>
-                    <div className="handle nw" onPointerDown={(e)=> onPointerDownLayer(e, l, 'nw')}></div>
-                    <div className="handle ne" onPointerDown={(e)=> onPointerDownLayer(e, l, 'ne')}></div>
-                    <div className="handle sw" onPointerDown={(e)=> onPointerDownLayer(e, l, 'sw')}></div>
-                    <div className="handle se" onPointerDown={(e)=> onPointerDownLayer(e, l, 'se')}></div>
-                  </>
-                )}
-              </div>
+          {/* ワークスペース */}
+          <div ref={containerRef} className="relative bg-white border shadow overflow-hidden"
+            style={{ width:cw, height:ch }}>
+            
+            {/* 写真 */}
+            {photos.map((p) => (
+              <img key={p.id} src={p.url}
+                style={{ position:"absolute", left:p.x, top:p.y, width:p.w, height:p.h }}
+              />
             ))}
 
+            {/* テキスト */}
+            {texts.map((t) => (
+              editingId === t.id ? (
+                <textarea
+                  key={t.id}
+                  autoFocus
+                  value={t.content}
+                  onChange={(e) => handleTextChange(t.id, e.target.value)}
+                  onBlur={() => setEditingId(null)}
+                  onKeyDown={(e) => { if (e.key === "Enter") setEditingId(null); }}
+                  style={{
+                    position: "absolute",
+                    left: t.x,
+                    top: t.y,
+                    minWidth: "200px",
+                    background: "transparent",
+                    border: "1px dashed gray",
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif"
+                  }}
+                />
+              ) : (
+                <div
+                  key={t.id}
+                  className="editable-text absolute"
+                  style={{ left: t.x, top: t.y }}
+                  onDoubleClick={() => setEditingId(t.id)}
+                >
+                  {t.content}
+                </div>
+              )
+            ))}
           </div>
         </div>
-
-      </div>
-
-      {/* tooltip */}
-      {tooltip.tip && <div className="tooltip" style={{left: tooltip.tip.x, top: tooltip.tip.y}}>{tooltip.tip.text}</div>}
-    </div>
-  );
-
-  // local state helpers used in JSX scope
-  function addText(text='ダブルクリックで編集'){
-    const id = uid();
-    const photos = layers.filter(l=> l.type==='photo');
-    const y = photos.length > 0 ? Math.max(...photos.map(p=> p.y + p.height)) + 16 : 40;
-    const l = { id, type:'text', name:`Text ${layers.filter(l=>l.type==='text').length+1}`, visible:true, x:40, y, width: Math.min(600, canvasSize.w - 80), height:60, text, fontSize:28, lineHeight:1.4, align:'left', weight:600, italic:false, underline:false, color:'#0f172a', opacity:1 };
-    setLayers(prev => [...prev, l]);
-    setSelected([id]);
-  }
-
-  // the startEditing/commitEditing and editingValueLocal are in closure for JSX; define here
-  const [editingValueLocal, setEditingValueLocal] = useState('');
-  function startEditing(layer){
-    if(layer.type !== 'text') return;
-    setEditingId(layer.id);
-    setEditingValueLocal(layer.text || '');
-    setEditingRect({x: layer.x, y: layer.y, w: layer.width, h: layer.height});
-    setSelected([layer.id]);
-    setTimeout(()=> { try{ const ta = document.querySelector('textarea.editing'); if(ta) ta.focus(); }catch(e){} }, 0);
-  }
-  function commitEditing(){
-    if(!editingId) return;
-    setLayers(prev => prev.map(l => l.id === editingId ? {...l, text: editingValueLocal} : l));
-    setEditingId(null);
-    setEditingValueLocal('');
-    setEditingRect(null);
-  }
-  async function exportImage(format='png', scale=1, quality=0.98){
-    const W = Math.round(canvasSize.w * scale), H = Math.round(canvasSize.h * scale);
-    const c = document.createElement('canvas'); c.width = W; c.height = H;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,H);
-    for(const l of layers){
-      if(!l.visible) continue;
-      if(l.type === 'photo'){
-        await new Promise(res=>{
-          const img = new Image(); img.crossOrigin = 'anonymous';
-          img.onload = ()=> { ctx.globalAlpha = l.opacity; ctx.drawImage(img, l.x*scale, l.y*scale, l.width*scale, l.height*scale); ctx.globalAlpha = 1; res(); };
-          img.onerror = ()=> res();
-          img.src = l.url;
-        });
-      } else if(l.type === 'text'){
-        ctx.save(); ctx.globalAlpha = l.opacity;
-        const size = Math.round((l.fontSize || 28) * scale);
-        ctx.fillStyle = l.color || '#000';
-        ctx.font = `${l.italic ? 'italic ' : ''}${l.weight || 600} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-        ctx.textBaseline = 'top';
-        const maxW = l.width * scale;
-        const paras = (l.text || '').split('\n');
-        const lines = [];
-        paras.forEach(p=>{
-          const words = p.split(' ');
-          let line = '';
-          for(const w of words){
-            const test = line ? (line + ' ' + w) : w;
-            if(ctx.measureText(test).width > maxW && line){ lines.push(line); line = w; } else { line = test; }
-          }
-          lines.push(line);
-        });
-        let y = l.y * scale;
-        const lh = Math.round(size * (l.lineHeight || 1.3));
-        for(const line of lines){
-          let x = l.x * scale;
-          const w = ctx.measureText(line).width;
-          if(l.align === 'center') x = l.x * scale + (maxW - w)/2;
-          if(l.align === 'right') x = l.x * scale + (maxW - w);
-          ctx.fillText(line, x, y);
-          if(l.underline) ctx.fillRect(x, y + size*0.85, w, Math.max(1, Math.round(size*0.06)));
-          y += lh;
-        }
-        ctx.restore();
-      }
+      );
     }
-    const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
-    const q = format === 'png' ? 1 : quality;
-    const data = c.toDataURL(mime, q);
-    const a = document.createElement('a'); a.href = data; a.download = `frame_export.${format}`; a.click();
-  }
 
-} // end App
-
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-</script>
+    ReactDOM.render(<App />, document.getElementById("root"));
+  </script>
 </body>
 </html>
