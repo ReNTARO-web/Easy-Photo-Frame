@@ -2,361 +2,397 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ワークスペース編集 & プレビュー | フレームメーカー</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>フレームメーカー｜レイヤー編集キャンバス</title>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
-    :root{--chrome:#f5f5f7;--panel:#ffffff;--ink:#111827;--muted:#6b7280;--accent:#2563eb;--line:#e5e7eb}
-    html,body{height:100%}
-    body{font-family:'Montserrat',system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;background:var(--chrome);color:var(--ink)}
-    /* Appleっぽい余白＆カード */
+    :root{--chrome:#f5f5f7;--panel:#ffffff;--ink:#0f172a;--muted:#64748b;--accent:#2563eb;--line:#e2e8f0}
+    html,body,#root{height:100%}
+    body{font-family:'Montserrat',system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--chrome);color:var(--ink)}
     .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
     .btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:.5rem .8rem}
-    .btn-primary{background:var(--ink);color:#fff;border-color:var(--ink)}
-    .btn-ghost{background:transparent}
-    .btn:disabled{opacity:.5}
-    .input, .select{border:1px solid var(--line);border-radius:10px;padding:.5rem .6rem;background:#fff}
-
-    /* キャンバス編集用ハンドル */
-    .handle{position:absolute;width:10px;height:10px;border:1px solid #fff;background:var(--accent);border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.15);}
-    .handle.nw{top:-6px;left:-6px;cursor:nwse-resize}
-    .handle.ne{top:-6px;right:-6px;cursor:nesw-resize}
-    .handle.sw{bottom:-6px;left:-6px;cursor:nesw-resize}
-    .handle.se{bottom:-6px;right:-6px;cursor:nwse-resize}
-
+    .btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+    .btn.ghost{background:transparent}
+    .input,.select,textarea{border:1px solid var(--line);border-radius:10px;padding:.5rem .6rem;background:#fff}
+    .grid-bg{background-image:linear-gradient(to right,#e5e7eb 1px,transparent 1px),linear-gradient(to bottom,#e5e7eb 1px,transparent 1px);background-size:20px 20px}
+    .checker{background:conic-gradient(#eee 25%,#fff 0 50%,#eee 0 75%,#fff 0) 0 0/20px 20px}
+    .handle{position:absolute;width:14px;height:14px;border:1px solid #fff;background:var(--accent);border-radius:3px;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+    .handle.nw{top:-8px;left:-8px;cursor:nwse-resize}
+    .handle.ne{top:-8px;right:-8px;cursor:nesw-resize}
+    .handle.sw{bottom:-8px;left:-8px;cursor:nesw-resize}
+    .handle.se{bottom:-8px;right:-8px;cursor:nwse-resize}
     .select-ring{outline:2px solid var(--accent)}
     .no-select{user-select:none}
-
-    /* グリッド */
-    .grid-bg{background-image: linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px); background-size: 20px 20px;}
-
-    /* チェッカーボード（透明プレビューの見やすさ向上） */
-    .checker{background: conic-gradient(#eee 25%, #fff 0 50%, #eee 0 75%, #fff 0) 0 0/20px 20px}
-
-    /* レイヤー行の選択 */
-    .row{border-radius:10px;padding:.4rem .6rem}
-    .row.selected{background:#eef2ff}
+    .tooltip{position:fixed;pointer-events:none;background:#111827;color:#fff;padding:.25rem .5rem;border-radius:.5rem;font-size:12px;white-space:nowrap}
+    .guide{position:absolute;background:#60a5fa}
+    .guide.h{height:1px;width:100%}
+    .guide.v{width:1px;height:100%}
+    .layer-row{border-radius:10px;padding:.35rem .6rem}
+    .layer-row.selected{background:#eef2ff}
+    /* レスポンシブ：縦積み→2カラム→3カラム */
+    @media (max-width: 1024px){.layout{grid-template-columns:1fr}}
+    @media (min-width: 1025px) and (max-width: 1399px){.layout{grid-template-columns:320px 1fr}}
+    @media (min-width: 1400px){.layout{grid-template-columns:320px 1fr 300px}}
+    /* モバイル向けタップ領域拡大 */
+    .tap{min-height:40px}
+    /* contentEditable の見た目 */
+    .text-layer{outline:none;background:transparent}
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const {useState, useRef, useEffect, useCallback, useMemo} = React;
+    const {useState,useRef,useEffect,useCallback,useMemo} = React;
 
-    // 比率プリセット（ワンクリック）
-    const RATIO_PRESETS = [
-      {key:'Post 1:1 (1080)', w:1080, h:1080},
-      {key:'Story 9:16 (1080x1920)', w:1080, h:1920},
-      {key:'Reel 4:5 (1080x1350)', w:1080, h:1350},
-      {key:'X 16:9 (1920x1080)', w:1920, h:1080},
-      {key:'YouTube Thumb 1280x720', w:1280, h:720},
-      {key:'X Header 1500x500', w:1500, h:500},
-      {key:'汎用 4:3 (1600x1200)', w:1600, h:1200},
-      {key:'写真 3:2 (1800x1200)', w:1800, h:1200},
-      {key:'A4 縦 2480x3508', w:2480, h:3508},
-      {key:'A4 横 3508x2480', w:3508, h:2480},
+    // --- プリセット比率 ---
+    const PRESETS = [
+      {label:'Post 1:1 (1080)', w:1080, h:1080},
+      {label:'Story 9:16 (1080x1920)', w:1080, h:1920},
+      {label:'Reel 4:5 (1080x1350)', w:1080, h:1350},
+      {label:'X 16:9 (1920x1080)', w:1920, h:1080},
+      {label:'YouTube Thumb 1280x720', w:1280, h:720},
+      {label:'X Header 1500x500', w:1500, h:500},
+      {label:'汎用 4:3 (1600x1200)', w:1600, h:1200},
+      {label:'写真 3:2 (1800x1200)', w:1800, h:1200},
+      {label:'A4 縦 2480x3508', w:2480, h:3508},
+      {label:'A4 横 3508x2480', w:3508, h:2480},
     ];
 
-    // レイヤー型: photo | text
-    // 各layer: { id, type, name, visible, x, y, width, height, url?(photo), text?(text), fontSize, color, opacity }
+    // ツールチップ（ホバー中のみ表示）
+    function useTooltip(){
+      const [tip,setTip] = useState(null); // {x,y,text}
+      const show = (text, e)=> setTip({text, x:e.clientX+12, y:e.clientY+12});
+      const move = (e)=> tip && setTip(t=>({...t, x:e.clientX+12, y:e.clientY+12}));
+      const hide = ()=> setTip(null);
+      return {tip, show, move, hide};
+    }
 
     function App(){
-      const [canvasSize, setCanvasSize] = useState({w:1080, h:1080});
-      const [layers, setLayers] = useState([]); // 下が背面、上が前面
-      const [selectedId, setSelectedId] = useState(null);
-      const [showGrid, setShowGrid] = useState(true);
-      const [snap, setSnap] = useState(true);
-      const [exportFormat, setExportFormat] = useState('png');
-      const [exportQuality, setExportQuality] = useState(0.98); // jpeg/webp用
-      const [exportScale, setExportScale] = useState(1); // 書き出しスケール
+      const [canvas, setCanvas] = useState({w:1080,h:1080, grid:true, snap:true});
+      const [layers,setLayers] = useState([]); // z順：先=背面
+      const [selectedIds,setSelectedIds] = useState([]);
+      const [exportFormat,setExportFormat] = useState('png');
+      const [exportQuality,setExportQuality] = useState(0.98);
+      const [exportScale,setExportScale] = useState(1);
+      const [alignBaseline,setAlignBaseline] = useState('left');
 
-      const editorRef = useRef(null);
+      const canvasRef = useRef(null);
       const fileRef = useRef(null);
+      const dragRef = useRef(null);
+      const shiftPressed = useRef(false);
 
-      // シンプルなEXIF代替テキスト（ユーザー要望: テキストのみ・アイコン禁止）
-      const [metaText, setMetaText] = useState({
-        camera: 'Camera Model | 24-70mm f/2.8',
-        settings: '50mm | f/2.8 | 1/125s | ISO 800',
-        datetime: new Date().toLocaleString('ja-JP')
-      });
+      const {tip,show,move,hide} = useTooltip();
 
-      // --- ユーティリティ ---
-      const addPhotoLayer = (url, naturalWidth, naturalHeight)=>{
+      // --- レイヤー操作 ---
+      const selected = useMemo(()=> layers.filter(l=>selectedIds.includes(l.id)), [layers,selectedIds]);
+
+      const addPhoto = (url, naturalWidth, naturalHeight)=>{
         const id = crypto.randomUUID();
-        const startW = Math.min(480, naturalWidth);
-        const ratio = naturalWidth / naturalHeight;
-        const startH = Math.round(startW / ratio);
-        setLayers(prev=>[...prev,{
-          id, type:'photo', name:`写真 ${prev.filter(l=>l.type==='photo').length+1}`,
-          visible:true, x:40+prev.length*12, y:40+prev.length*12, width:startW, height:startH, url,
-          opacity:1
-        }]);
-        setSelectedId(id);
+        const baseW = Math.min( Math.max(360, canvas.w*0.4), naturalWidth );
+        const ratio = naturalWidth/naturalHeight; const baseH = Math.round(baseW/ratio);
+        // デフォルト位置：最後に読み込んだ写真の下に配置
+        const photos = layers.filter(l=>l.type==='photo');
+        const belowY = photos.length>0 ? Math.max(...photos.map(p=>p.y+p.height)) + 16 : 40;
+        const x = 40;
+        const layer = {id,type:'photo',name:`写真 ${photos.length+1}`,visible:true,x,y:belowY,width:baseW,height:baseH,url,opacity:1, lock:false};
+        setLayers(prev=>[...prev, layer]);
+        setSelectedIds([id]);
       };
 
-      const addTextLayer = (text)=>{
+      const addText = (text='新しいテキスト')=>{
         const id = crypto.randomUUID();
-        setLayers(prev=>[...prev,{
-          id, type:'text', name:`テキスト ${prev.filter(l=>l.type==='text').length+1}`,
-          visible:true, x:60+prev.length*8, y:60+prev.length*8, width:360, height:40,
-          text, fontSize:18, color:'#111827', opacity:1
-        }]);
-        setSelectedId(id);
+        const photos = layers.filter(l=>l.type==='photo');
+        const belowY = photos.length>0 ? Math.max(...photos.map(p=>p.y+p.height)) + 16 : 40;
+        const x = 40;
+        const layer = {id,type:'text',name:`テキスト ${layers.filter(l=>l.type==='text').length+1}`,visible:true,x,y:belowY,width:Math.min(560, canvas.w-80),height:60,opacity:1, text, align:'left', fontSize:28, line:1.4, weight:600, italic:false, underline:false, color:'#0f172a', lock:false};
+        setLayers(prev=>[...prev, layer]);
+        setSelectedIds([id]);
       };
 
-      const removeLayer = (id)=> setLayers(prev=>prev.filter(l=>l.id!==id));
-      const bringForward = (id)=> setLayers(prev=>{
-        const idx = prev.findIndex(l=>l.id===id); if(idx===-1||idx===prev.length-1) return prev;
-        const arr=[...prev]; [arr[idx], arr[idx+1]]=[arr[idx+1], arr[idx]]; return arr;
-      });
-      const sendBackward = (id)=> setLayers(prev=>{
-        const idx = prev.findIndex(l=>l.id===id); if(idx<=0) return prev;
-        const arr=[...prev]; [arr[idx], arr[idx-1]]=[arr[idx-1], arr[idx]]; return arr;
-      });
+      const updateLayer = (id, patch)=> setLayers(prev=> prev.map(l=> l.id===id? {...l, ...patch}: l));
+      const updateMany = (ids, patch)=> setLayers(prev=> prev.map(l=> ids.includes(l.id)? {...l, ...patch}: l));
+      const removeSelected = ()=> setLayers(prev=> prev.filter(l=> !selectedIds.includes(l.id)));
+      const bringForward = ()=> setLayers(prev=>{
+        const arr=[...prev]; selectedIds.forEach(id=>{
+          const i=arr.findIndex(l=>l.id===id); if(i<arr.length-1){ [arr[i],arr[i+1]]=[arr[i+1],arr[i]]; }
+        }); return arr; });
+      const sendBackward = ()=> setLayers(prev=>{
+        const arr=[...prev]; selectedIds.slice().reverse().forEach(id=>{
+          const i=arr.findIndex(l=>l.id===id); if(i>0){ [arr[i],arr[i-1]]=[arr[i-1],arr[i]]; }
+        }); return arr; });
 
-      const updateLayer = (id, patch)=> setLayers(prev=>prev.map(l=> l.id===id? {...l, ...patch}: l));
-
-      // --- 画像読み込み ---
-      const onFilesChange = (e)=>{
+      // --- ファイル読み込み ---
+      const onFiles = (e)=>{
         const files = Array.from(e.target.files||[]);
-        files.forEach(file=>{
-          if(!file.type.startsWith('image/')) return;
-          const url = URL.createObjectURL(file);
-          const img = new Image();
-          img.onload = ()=> addPhotoLayer(url, img.naturalWidth, img.naturalHeight);
-          img.src = url;
-        });
-        e.target.value = '';
+        files.forEach(f=>{
+          if(!f.type.startsWith('image/')) return;
+          const url = URL.createObjectURL(f);
+          const img = new Image(); img.onload = ()=> addPhoto(url, img.naturalWidth, img.naturalHeight); img.src=url;
+        }); e.target.value='';
       };
 
-      // --- スナップ（グリッド＆他オブジェクトの辺） ---
-      const snapValue = (val, step)=> Math.round(val/step)*step;
-      const SNAP_STEP = 10; const SNAP_RANGE = 6;
+      // --- スナップ処理 ---
+      const SNAP = {step:10, range:6};
+      const rectOf = (l)=>({id:l.id, x:l.x, y:l.y, w:l.width, h:l.height, cx:l.x+l.width/2, cy:l.y+l.height/2, r:l.x+l.width, b:l.y+l.height});
 
-      const applySnap = (moving)=>{
-        if(!snap) return moving;
-        // グリッド
-        let {x,y,width,height} = moving; 
-        x = snapValue(x, SNAP_STEP); y = snapValue(y, SNAP_STEP);
-        width = Math.max(10, snapValue(width, SNAP_STEP));
-        height = Math.max(10, snapValue(height, SNAP_STEP));
-        // 簡易: 他レイヤーの左/右/上/下に吸着
-        const others = layers.filter(l=>l.id!==moving.id && l.visible);
-        const edges = (r)=>({L:r.x, R:r.x+r.width, T:r.y, B:r.y+r.height});
-        const me = edges({x,y,width,height});
-        others.forEach(o=>{
-          const e = edges(o);
-          [['L','L','x'],['L','R','x'],['R','L','x'],['R','R','x']].forEach(([a,b,axis])=>{
-            const da = (a==='L'?me.L:me.R) - (b==='L'?e.L:e.R);
-            if(Math.abs(da)<=SNAP_RANGE){
-              if(axis==='x'){
-                if(a==='L') x -= da; else x -= da; // 左右を合わせる
-              }
-            }
-          });
-          [['T','T','y'],['T','B','y'],['B','T','y'],['B','B','y']].forEach(([a,b,axis])=>{
-            const da = (a==='T'?me.T:me.B) - (b==='T'?e.T:e.B);
-            if(Math.abs(da)<=SNAP_RANGE){ if(axis==='y'){ if(a==='T') y -= da; else y -= da; } }
-          });
-        });
-        return {...moving, x,y,width,height};
+      const computeSnap = (moving)=>{
+        if(!canvas.snap) return moving;
+        const others = layers.filter(l=> l.id!==moving.id && l.visible).map(rectOf);
+        const guidesX = [0, canvas.w/2, canvas.w];
+        const guidesY = [0, canvas.h/2, canvas.h];
+        others.forEach(o=>{ guidesX.push(o.x,o.cx,o.r); guidesY.push(o.y,o.cy,o.b); });
+
+        const edges = {L:moving.x, CX:moving.x+moving.width/2, R:moving.x+moving.width, T:moving.y, CY:moving.y+moving.height/2, B:moving.y+moving.height};
+        const out = {...moving};
+        const snapVal = (val, list)=>{
+          let best=null, diff=Infinity; list.forEach(t=>{ const d=Math.abs(val-t); if(d<diff){diff=d; best=t;} });
+          return (diff<=SNAP.range)? best: null;
+        };
+        // x方向: L,CX,R を判定
+        const sL = snapVal(edges.L, guidesX); if(sL!==null) out.x += (sL-edges.L);
+        const sCX = snapVal(out.x+out.width/2, guidesX); if(sCX!==null) out.x += (sCX-(out.x+out.width/2));
+        const sR = snapVal(out.x+out.width, guidesX); if(sR!==null) out.x += (sR-(out.x+out.width));
+        // y方向: T,CY,B
+        const sT = snapVal(edges.T, guidesY); if(sT!==null) out.y += (sT-edges.T);
+        const sCY = snapVal(out.y+out.height/2, guidesY); if(sCY!==null) out.y += (sCY-(out.y+out.height/2));
+        const sB = snapVal(out.y+out.height, guidesY); if(sB!==null) out.y += (sB-(out.y+out.height));
+        // グリッド吸着
+        const grid = (v)=> Math.round(v/SNAP.step)*S
+NAP.step;
+        out.x = grid(out.x); out.y = grid(out.y);
+        out.width = Math.max(10, grid(out.width)); out.height = Math.max(10, grid(out.height));
+        return out;
       };
 
-      // --- ドラッグ＆リサイズ ---
-      const dragState = useRef(null);
+      // スナップガイドの表示
+      const [guides,setGuides] = useState([]); // {type:'h'|'v', pos:number}
 
-      const onMouseDownLayer = (e, layer, corner=null)=>{
-        e.stopPropagation();
-        setSelectedId(layer.id);
-        const startX = e.clientX, startY = e.clientY;
-        dragState.current = { mode: corner? 'resize':'drag', corner, startX, startY, start: {...layer} };
+      const updateGuides = (moving)=>{
+        if(!canvas.snap){ setGuides([]); return; }
+        const others = layers.filter(l=> l.id!==moving.id && l.visible).map(rectOf);
+        const gx = [0, canvas.w/2, canvas.w]; const gy = [0, canvas.h/2, canvas.h];
+        others.forEach(o=>{ gx.push(o.x,o.cx,o.r); gy.push(o.y,o.cy,o.b); });
+        const e = {L:moving.x, CX:moving.x+moving.width/2, R:moving.x+moving.width, T:moving.y, CY:moving.y+moving.height/2, B:moving.y+moving.height};
+        const near = [];
+        const nearVal = (val, list)=> list.find(t=> Math.abs(val-t)<=SNAP.range);
+        const vx = [e.L,e.CX,e.R].map(v=>nearVal(v,gx)).filter(Boolean);
+        const vy = [e.T,e.CY,e.B].map(v=>nearVal(v,gy)).filter(Boolean);
+        vx.forEach(v=> near.push({type:'v', pos:v}));
+        vy.forEach(v=> near.push({type:'h', pos:v}));
+        setGuides(near);
       };
 
-      const onMouseMoveEditor = (e)=>{
-        if(!dragState.current || !selectedId) return;
-        const l = layers.find(l=>l.id===selectedId); if(!l) return;
-        const {mode, corner, startX, startY, start} = dragState.current;
-        const dx = e.clientX - startX; const dy = e.clientY - startY;
-        if(mode==='drag'){
-          const moved = applySnap({ ...l, x:start.x + dx, y:start.y + dy });
-          updateLayer(l.id, { x:moved.x, y:moved.y });
+      // --- ポインタ操作（ドラッグ／リサイズ、複数選択ドラッグ対応） ---
+      const onPointerDownLayer = (e, layer, corner=null)=>{
+        e.preventDefault(); e.stopPropagation();
+        const multi = e.metaKey || e.ctrlKey || e.shiftKey; // トグル選択
+        setSelectedIds(prev=> multi? (prev.includes(layer.id)? prev.filter(id=>id!==layer.id): [...prev, layer.id]) : [layer.id]);
+        const start = {x:e.clientX, y:e.clientY};
+        dragRef.current = { mode: corner? 'resize':'drag', corner, start, origin: JSON.parse(JSON.stringify(layers)), aspect: layer.width/layer.height, ids: (multi? (selectedIds.includes(layer.id)? selectedIds: [...selectedIds, layer.id]) : [layer.id]) };
+      };
+
+      const onPointerMove = (e)=>{
+        if(!dragRef.current) return; const d = dragRef.current;
+        const dx = e.clientX - d.start.x; const dy = e.clientY - d.start.y;
+        if(d.mode==='drag'){
+          setLayers(d.origin.map(l=> d.ids.includes(l.id)? computeSnap({...l, x:l.x+dx, y:l.y+dy}) : l));
+          updateGuides({...d.origin.find(l=>d.ids.includes(l.id)), x:d.origin.find(l=>d.ids.includes(l.id)).x+dx, y:d.origin.find(l=>d.ids.includes(l.id)).y+dy, width:d.origin.find(l=>d.ids.includes(l.id)).width, height:d.origin.find(l=>d.ids.includes(l.id)).height});
         } else {
-          let nx=start.x, ny=start.y, nw=start.width, nh=start.height;
-          if(corner==='se'){ nw = Math.max(10, start.width + dx); nh = Math.max(10, start.height + dy); }
-          if(corner==='ne'){ nw = Math.max(10, start.width + dx); nh = Math.max(10, start.height - dy); ny = start.y + dy; }
-          if(corner==='sw'){ nw = Math.max(10, start.width - dx); nh = Math.max(10, start.height + dy); nx = start.x + dx; }
-          if(corner==='nw'){ nw = Math.max(10, start.width - dx); nh = Math.max(10, start.height - dy); nx = start.x + dx; ny = start.y + dy; }
-          const sized = applySnap({ ...l, x:nx, y:ny, width:nw, height:nh });
-          updateLayer(l.id, { x:sized.x, y:sized.y, width:sized.width, height:sized.height });
+          // リサイズ：選択1件のみハンドル表示
+          const l0 = d.origin.find(l=> d.ids[0]===l.id);
+          let nx=l0.x, ny=l0.y, nw=l0.width, nh=l0.height;
+          const ratio = d.aspect || 1;
+          const applyAspect = (w,h)=>{
+            if(!shiftPressed.current) return [w,h];
+            const fromCorner = d.corner; // 比率固定
+            if(fromCorner==='se'){ h = w/ratio; }
+            if(fromCorner==='ne'){ h = w/ratio; ny = l0.y + (l0.height - h); }
+            if(fromCorner==='sw'){ w = h*ratio; nx = l0.x + (l0.width - w); }
+            if(fromCorner==='nw'){ w = h*ratio; h = w/ratio; nx = l0.x + (l0.width - w); ny = l0.y + (l0.height - h); }
+            return [w,h];
+          };
+          if(d.corner==='se'){ [nw,nh]=applyAspect(l0.width+dx, l0.height+dy); }
+          if(d.corner==='ne'){ [nw,nh]=applyAspect(l0.width+dx, l0.height-dy); ny=l0.y+dy; }
+          if(d.corner==='sw'){ [nw,nh]=applyAspect(l0.width-dx, l0.height+dy); nx=l0.x+dx; }
+          if(d.corner==='nw'){ [nw,nh]=applyAspect(l0.width-dx, l0.height-dy); nx=l0.x+dx; ny=l0.y+dy; }
+          const snapped = computeSnap({ ...l0, x:nx, y:ny, width:Math.max(10,nw), height:Math.max(10,nh) });
+          setLayers(d.origin.map(l=> l.id===l0.id? snapped : l));
+          updateGuides(snapped);
         }
       };
-      const onMouseUpEditor = ()=>{ dragState.current=null; };
 
-      // エディタ空クリックで選択解除
-      const onBlankClick = ()=> setSelectedId(null);
+      const onPointerUp = ()=>{ dragRef.current=null; setGuides([]); };
 
-      // --- 透明背景の編集ビュー（ワークスペース）とガイド非表示のビュースペース（出力見た目） ---
-      const EditorCanvas = () => (
-        <div className="relative no-select border rounded-xl overflow-hidden card" style={{width:canvasSize.w/2, height:canvasSize.h/2}} onMouseMove={onMouseMoveEditor} onMouseUp={onMouseUpEditor}>
-          <div className={`absolute inset-0 ${showGrid? 'grid-bg':''} checker`} onMouseDown={onBlankClick}></div>
-          {layers.map(layer=> layer.visible && (
-            <div key={layer.id}
-                 className={`absolute ${selectedId===layer.id? 'select-ring':''}`}
-                 style={{left:layer.x/2, top:layer.y/2, width:layer.width/2, height:layer.height/2, opacity:layer.opacity}}
-                 onMouseDown={(e)=>onMouseDownLayer(e, layer)}>
-              {layer.type==='photo' && (
-                <img src={layer.url} draggable={false} className="w-full h-full object-cover" />
-              )}
-              {layer.type==='text' && (
-                <div className="w-full h-full" style={{
-                  color:layer.color, fontSize:(layer.fontSize/2)+'px', lineHeight:1.3, background:'transparent'
-                }}>{layer.text}</div>
-              )}
-              {selectedId===layer.id && (
-                <>
-                  <div className="handle nw" onMouseDown={(e)=>onMouseDownLayer(e, layer, 'nw')}></div>
-                  <div className="handle ne" onMouseDown={(e)=>onMouseDownLayer(e, layer, 'ne')}></div>
-                  <div className="handle sw" onMouseDown={(e)=>onMouseDownLayer(e, layer, 'sw')}></div>
-                  <div className="handle se" onMouseDown={(e)=>onMouseDownLayer(e, layer, 'se')}></div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      );
+      // --- キー操作（矢印で微調整、削除、ショートカット） ---
+      useEffect(()=>{
+        const onKey = (e)=>{
+          if(e.key==='Shift') shiftPressed.current = (e.type==='keydown');
+          if(selectedIds.length===0) return;
+          const step = (e.shiftKey? 10: 1);
+          if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+            e.preventDefault();
+            const dx = (e.key==='ArrowLeft')? -step : (e.key==='ArrowRight')? step : 0;
+            const dy = (e.key==='ArrowUp')? -step : (e.key==='ArrowDown')? step : 0;
+            setLayers(prev=> prev.map(l=> selectedIds.includes(l.id)? computeSnap({...l, x:l.x+dx, y:l.y+dy}) : l));
+          }
+          if((e.key==='Backspace'||e.key==='Delete') && e.type==='keydown'){
+            removeSelected();
+          }
+        };
+        window.addEventListener('keydown', onKey);
+        window.addEventListener('keyup', onKey);
+        return ()=>{ window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); };
+      },[selectedIds, canvas.snap]);
 
-      const ViewCanvas = () => (
-        <div className="relative card border rounded-xl overflow-hidden" style={{width:canvasSize.w/2, height:canvasSize.h/2}}>
-          <div className="absolute inset-0 bg-white"></div>
-          {layers.map(layer=> layer.visible && (
-            <div key={layer.id} className="absolute" style={{left:layer.x/2, top:layer.y/2, width:layer.width/2, height:layer.height/2, opacity:layer.opacity}}>
-              {layer.type==='photo' && (<img src={layer.url} draggable={false} className="w-full h-full object-cover" />)}
-              {layer.type==='text' && (
-                <div style={{color:layer.color, fontSize:(layer.fontSize/2)+'px', lineHeight:1.3, background:'transparent'}}>{layer.text}</div>
-              )}
-            </div>
-          ))}
-        </div>
-      );
+      // --- 整列 / 分布 ---
+      const align = (type)=>{
+        if(selected.length<2) return;
+        const box = {x:Math.min(...selected.map(l=>l.x)), y:Math.min(...selected.map(l=>l.y))};
+        box.r = Math.max(...selected.map(l=>l.x+l.width)); box.b = Math.max(...selected.map(l=>l.y+l.height));
+        const cx = (box.x+box.r)/2; const cy=(box.y+box.b)/2;
+        setLayers(prev=> prev.map(l=>{
+          if(!selectedIds.includes(l.id)) return l;
+          if(type==='left') return {...l, x:box.x};
+          if(type==='centerX') return {...l, x:Math.round(cx - l.width/2)};
+          if(type==='right') return {...l, x:box.r - l.width};
+          if(type==='top') return {...l, y:box.y};
+          if(type==='centerY') return {...l, y:Math.round(cy - l.height/2)};
+          if(type==='bottom') return {...l, y:box.b - l.height};
+          return l;
+        }));
+      };
 
-      // --- 高画質書き出し（オフスクリーンCanvasで合成・PNG(可逆)/JPEG/WebP対応） ---
+      const distribute = (axis)=>{
+        if(selected.length<3) return;
+        const sorted = [...selected].sort((a,b)=> (axis==='x'? a.x-b.x: a.y-b.y));
+        const start = axis==='x'? sorted[0].x : sorted[0].y;
+        const end = axis==='x'? (sorted.at(-1).x+sorted.at(-1).width) : (sorted.at(-1).y+sorted.at(-1).height);
+        const totalSize = sorted.reduce((s,l)=> s + (axis==='x'? l.width: l.height), 0);
+        const gaps = sorted.length-1; const gap = Math.max(0,(end - start - totalSize)/gaps);
+        let pos = start; const map = new Map();
+        sorted.forEach(l=>{ map.set(l.id, pos); pos += (axis==='x'? l.width: l.height) + gap; });
+        setLayers(prev=> prev.map(l=> selectedIds.includes(l.id)? (axis==='x'? {...l, x:Math.round(map.get(l.id))}: {...l, y:Math.round(map.get(l.id))}) : l));
+      };
+
+      // --- テキスト編集（contentEditable + サイド設定） ---
+      const onTextInput = (id, e)=> updateLayer(id, { text: e.currentTarget.innerText });
+
+      // --- エクスポート（編集ビューそのまま） ---
       const exportImage = async ()=>{
-        const w = Math.round(canvasSize.w * exportScale);
-        const h = Math.round(canvasSize.h * exportScale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0,0,w,h);
-        // 背景は白（透明が良ければコメントアウト）
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0,0,w,h);
-
-        // レイヤー順に描画
-        for(const layer of layers){
-          if(!layer.visible) continue;
-          if(layer.type==='photo'){
-            await new Promise(res=>{
-              const img = new Image();
-              img.crossOrigin = 'anonymous';
-              img.onload = ()=>{ ctx.globalAlpha = layer.opacity; ctx.drawImage(img, layer.x*exportScale, layer.y*exportScale, layer.width*exportScale, layer.height*exportScale); ctx.globalAlpha = 1; res(); };
-              img.src = layer.url;
+        const W = Math.round(canvas.w * exportScale), H = Math.round(canvas.h * exportScale);
+        const cvs = document.createElement('canvas'); cvs.width=W; cvs.height=H; const ctx=cvs.getContext('2d');
+        ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,H);
+        for(const l of layers){
+          if(!l.visible) continue;
+          if(l.type==='photo'){
+            await new Promise(res=>{ const img=new Image(); img.onload=()=>{ ctx.globalAlpha=l.opacity; ctx.drawImage(img, l.x*exportScale, l.y*exportScale, l.width*exportScale, l.height*exportScale); ctx.globalAlpha=1; res(); }; img.src=l.url; });
+          } else if(l.type==='text'){
+            ctx.save(); ctx.globalAlpha=l.opacity; ctx.fillStyle=l.color; ctx.textBaseline='top';
+            const size = Math.round(l.fontSize*exportScale);
+            const style = `${l.italic? 'italic ':''}${l.weight} ${size}px Montserrat, sans-serif`;
+            ctx.font = style;
+            // 折返し
+            const maxW = l.width*exportScale; const lines=[]; const words=(l.text||'').split(/
+/);
+            const pushWrapped = (txt)=>{
+              let line=''; for(const ch of txt){ const test=line+ch; if(ctx.measureText(test).width > maxW){ lines.push(line); line=ch; } else { line=test; } } lines.push(line);
+            };
+            words.forEach(w=> pushWrapped(w));
+            let y=l.y*exportScale; const lh=size*l.line;
+            lines.forEach(t=>{
+              let x=l.x*exportScale; const w=ctx.measureText(t).width;
+              if(l.align==='center') x = l.x*exportScale + (maxW - w)/2;
+              if(l.align==='right') x = l.x*exportScale + (maxW - w);
+              ctx.fillText(t, x, y); if(l.underline){ ctx.fillRect(x, y+size*0.85, w, Math.max(1,Math.round(size*0.06))); }
+              y += lh;
             });
-          } else if(layer.type==='text'){
-            ctx.save();
-            ctx.globalAlpha = layer.opacity; 
-            ctx.fillStyle = layer.color; 
-            ctx.font = `${Math.round(layer.fontSize*exportScale)}px Montserrat, sans-serif`;
-            // width/heightは枠ではなく編集の目安なので折返し簡易対応
-            const words = (layer.text+'').split('\n');
-            let y = (layer.y*exportScale) + (layer.fontSize*exportScale);
-            words.forEach(line=>{ ctx.fillText(line, layer.x*exportScale, y); y += layer.fontSize*exportScale*1.3; });
             ctx.restore();
           }
         }
-
-        const type = ({png:'image/png', jpeg:'image/jpeg', webp:'image/webp'})[exportFormat] || 'image/png';
-        const q = exportFormat==='png'? 1 : exportQuality; // PNGは無圧縮
-        const data = canvas.toDataURL(type, q);
-        const a = document.createElement('a'); a.href = data; a.download = `export.${exportFormat}`; a.click();
+        const mime = ({png:'image/png', jpeg:'image/jpeg', webp:'image/webp'})[exportFormat] || 'image/png';
+        const q = exportFormat==='png'? 1 : exportQuality;
+        const data = cvs.toDataURL(mime, q);
+        const a = document.createElement('a'); a.href=data; a.download=`export.${exportFormat}`; a.click();
       };
 
-      // 初期テキストレイヤー（メタ情報）
-      useEffect(()=>{
-        if(layers.length===0){
-          addTextLayer(metaText.camera);
-          addTextLayer(metaText.settings);
-          addTextLayer(metaText.datetime);
-        }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      },[]);
+      // --- レイヤー行コンポーネント（テキストのみUI） ---
+      const LayerRow = ({l})=> (
+        <div className={`layer-row flex items-center gap-2 border border-transparent ${selectedIds.includes(l.id)? 'selected border-indigo-200':''}`}>
+          <input aria-label="表示/非表示" type="checkbox" checked={l.visible} onChange={e=>updateLayer(l.id,{visible:e.target.checked})}
+                 onMouseEnter={(e)=>show('表示/非表示',e)} onMouseMove={move} onMouseLeave={hide} />
+          <button className="btn tap" onClick={()=> setSelectedIds([l.id])}
+                  onMouseEnter={(e)=>show('選択',e)} onMouseMove={move} onMouseLeave={hide}>選択</button>
+          <div className="truncate" title={l.name}>{l.name}（{l.type}）</div>
+          <button className="btn tap" onClick={()=> setLayers(prev=> prev.filter(x=>x.id!==l.id))}
+                  onMouseEnter={(e)=>show('削除',e)} onMouseMove={move} onMouseLeave={hide}>削除</button>
+        </div>
+      );
 
-      const selected = layers.find(l=>l.id===selectedId) || null;
+      // --- キャンバス要素 ---
+      const Guides = ()=> (
+        <>
+          {guides.map((g,i)=> (
+            <div key={i} className={`guide ${g.type}`} style={{left:g.type==='v'? g.pos:0, top:g.type==='h'? g.pos:0}}/>
+          ))}
+        </>
+      );
 
       return (
-        <div className="p-6">
-          <div className="max-w-[1400px] mx-auto grid grid-cols-[320px,1fr,1fr] gap-6 items-start">
-            {/* 左: サイドバー（レイヤー/プロパティ） */}
+        <div className="p-4 md:p-6">
+          <div className="layout grid gap-6 max-w-[1600px] mx-auto items-start">
+            {/* 左パネル：レイヤー / プロパティ / 書き出し */}
             <aside className="card p-4 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h2 className="text-lg font-semibold">レイヤー</h2>
-                <button className="btn" onClick={()=>fileRef.current.click()}>画像追加</button>
-                <input type="file" accept="image/*" multiple className="hidden" ref={fileRef} onChange={onFilesChange}/>
+                <div className="flex gap-2">
+                  <button className="btn tap" onClick={()=>fileRef.current.click()} onMouseEnter={(e)=>show('画像を追加',e)} onMouseMove={move} onMouseLeave={hide}>画像追加</button>
+                  <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={onFiles} />
+                  <button className="btn tap" onClick={()=>addText()} onMouseEnter={(e)=>show('テキストを追加',e)} onMouseMove={move} onMouseLeave={hide}>テキスト追加</button>
+                </div>
               </div>
-
-              {/* レイヤーリスト（上が前面） */}
-              <div className="space-y-1">
-                {layers.map((l, i)=> (
-                  <div key={l.id} className={`row flex items-center gap-2 border border-transparent ${selectedId===l.id? 'selected border-indigo-200':''}`}>
-                    <input type="checkbox" checked={l.visible} onChange={(e)=>updateLayer(l.id,{visible:e.target.checked})} title="表示/非表示"/>
-                    <button className="btn" onClick={()=>sendBackward(l.id)} title="下へ">下</button>
-                    <button className="btn" onClick={()=>bringForward(l.id)} title="上へ">上</button>
-                    <button className="btn" onClick={()=>setSelectedId(l.id)} title="選択">選択</button>
-                    <div className="truncate" title={l.name}>{l.name}（{l.type}）</div>
-                    <button className="btn" onClick={()=>removeLayer(l.id)} title="削除">削除</button>
-                  </div>
-                ))}
+              <div className="space-y-1 max-h-[40vh] overflow-auto">
+                {layers.map(l=> <LayerRow key={l.id} l={l}/>) }
               </div>
 
               <div className="h-px bg-gray-200"/>
 
               <div className="space-y-3">
                 <h3 className="font-medium">プロパティ</h3>
-                {selected? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="text-sm text-gray-600 col-span-1">X
-                      <input className="input w-full" type="number" value={selected.x} onChange={e=>updateLayer(selected.id,{x:parseInt(e.target.value||0)})}/>
-                    </label>
-                    <label className="text-sm text-gray-600 col-span-1">Y
-                      <input className="input w-full" type="number" value={selected.y} onChange={e=>updateLayer(selected.id,{y:parseInt(e.target.value||0)})}/>
-                    </label>
-                    <label className="text-sm text-gray-600 col-span-1">幅
-                      <input className="input w-full" type="number" value={selected.width} onChange={e=>updateLayer(selected.id,{width:Math.max(10,parseInt(e.target.value||0))})}/>
-                    </label>
-                    <label className="text-sm text-gray-600 col-span-1">高さ
-                      <input className="input w-full" type="number" value={selected.height} onChange={e=>updateLayer(selected.id,{height:Math.max(10,parseInt(e.target.value||0))})}/>
-                    </label>
-                    <label className="text-sm text-gray-600 col-span-2">不透明度
-                      <input className="w-full" type="range" min="0" max="1" step="0.01" value={selected.opacity} onChange={e=>updateLayer(selected.id,{opacity:parseFloat(e.target.value)})}/>
-                    </label>
-                    {selected.type==='text' && (
+                {selected.length===1? (
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <label>位置X<input className="input w-full" type="number" value={selected[0].x} onChange={e=>updateLayer(selected[0].id,{x:parseInt(e.target.value||0)})}/></label>
+                    <label>位置Y<input className="input w-full" type="number" value={selected[0].y} onChange={e=>updateLayer(selected[0].id,{y:parseInt(e.target.value||0)})}/></label>
+                    <label>幅<input className="input w-full" type="number" value={selected[0].width} onChange={e=>updateLayer(selected[0].id,{width:Math.max(10,parseInt(e.target.value||0))})}/></label>
+                    <label>高さ<input className="input w-full" type="number" value={selected[0].height} onChange={e=>updateLayer(selected[0].id,{height:Math.max(10,parseInt(e.target.value||0))})}/></label>
+                    <label className="col-span-2">不透明度<input className="w-full" type="range" min="0" max="1" step="0.01" value={selected[0].opacity} onChange={e=>updateLayer(selected[0].id,{opacity:parseFloat(e.target.value)})}/></label>
+                    {selected[0].type==='text' && (
                       <>
-                        <label className="text-sm text-gray-600 col-span-2">テキスト
-                          <textarea className="input w-full" rows="3" value={selected.text} onChange={e=>updateLayer(selected.id,{text:e.target.value})}></textarea>
+                        <label className="col-span-2">テキスト<textarea className="input w-full" rows="3" value={selected[0].text} onChange={e=>updateLayer(selected[0].id,{text:e.target.value})}></textarea></label>
+                        <label>サイズ<input className="input w-full" type="number" value={selected[0].fontSize} onChange={e=>updateLayer(selected[0].id,{fontSize:Math.max(8,parseInt(e.target.value||12))})}/></label>
+                        <label>行間<input className="input w-full" type="number" step="0.1" value={selected[0].line} onChange={e=>updateLayer(selected[0].id,{line:Math.max(1,parseFloat(e.target.value||1.2))})}/></label>
+                        <label>太さ<input className="input w-full" type="number" value={selected[0].weight} onChange={e=>updateLayer(selected[0].id,{weight:parseInt(e.target.value||400)})}/></label>
+                        <label>色<input className="input w-full" type="color" value={selected[0].color} onChange={e=>updateLayer(selected[0].id,{color:e.target.value})}/></label>
+                        <label>整列
+                          <select className="select w-full" value={selected[0].align} onChange={e=>updateLayer(selected[0].id,{align:e.target.value})}>
+                            <option value="left">左</option>
+                            <option value="center">中央</option>
+                            <option value="right">右</option>
+                          </select>
                         </label>
-                        <label className="text-sm text-gray-600 col-span-1">文字サイズ
-                          <input className="input w-full" type="number" value={selected.fontSize} onChange={e=>updateLayer(selected.id,{fontSize:Math.max(8,parseInt(e.target.value||12))})}/>
-                        </label>
-                        <label className="text-sm text-gray-600 col-span-1">文字色
-                          <input className="input w-full" type="color" value={selected.color} onChange={e=>updateLayer(selected.id,{color:e.target.value})}/>
-                        </label>
+                        <div className="col-span-2 flex gap-2">
+                          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={selected[0].italic} onChange={e=>updateLayer(selected[0].id,{italic:e.target.checked})}/>イタリック</label>
+                          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={selected[0].underline} onChange={e=>updateLayer(selected[0].id,{underline:e.target.checked})}/>下線</label>
+                        </div>
                       </>
                     )}
                   </div>
+                ) : selected.length>1? (
+                  <div className="text-sm text-gray-600">{selected.length}件選択中：ツールバーから整列/分布を実行できます。</div>
                 ) : (
                   <div className="text-sm text-gray-500">レイヤーを選択してください</div>
                 )}
@@ -365,23 +401,17 @@
               <div className="h-px bg-gray-200"/>
 
               <div className="space-y-3">
-                <h3 className="font-medium">ワークスペース</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="text-sm text-gray-600 col-span-1">幅
-                    <input className="input w-full" type="number" value={canvasSize.w} onChange={e=>setCanvasSize(s=>({...s,w:Math.max(100,parseInt(e.target.value||0))}))}/>
-                  </label>
-                  <label className="text-sm text-gray-600 col-span-1">高さ
-                    <input className="input w-full" type="number" value={canvasSize.h} onChange={e=>setCanvasSize(s=>({...s,h:Math.max(100,parseInt(e.target.value||0))}))}/>
-                  </label>
-                  <label className="text-sm text-gray-600 col-span-2">プリセット
-                    <select className="select w-full" value={`${canvasSize.w}x${canvasSize.h}`} onChange={(e)=>{ const [w,h]=e.target.value.split('x').map(Number); setCanvasSize({w,h}); }}>
-                      {RATIO_PRESETS.map(p=> <option key={p.key} value={`${p.w}x${p.h}`}>{p.key}</option>)}
+                <h3 className="font-medium">キャンバス</h3>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <label>幅<input className="input w-full" type="number" value={canvas.w} onChange={e=>setCanvas(s=>({...s,w:Math.max(100,parseInt(e.target.value||0))}))}/></label>
+                  <label>高さ<input className="input w-full" type="number" value={canvas.h} onChange={e=>setCanvas(s=>({...s,h:Math.max(100,parseInt(e.target.value||0))}))}/></label>
+                  <label className="col-span-2">プリセット
+                    <select className="select w-full" value={`${canvas.w}x${canvas.h}`} onChange={(e)=>{const [w,h]=e.target.value.split('x').map(Number); setCanvas(s=>({...s,w,h}));}}>
+                      {PRESETS.map(p=> <option key={p.label} value={`${p.w}x${p.h}`}>{p.label}</option>)}
                     </select>
                   </label>
-                </div>
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={showGrid} onChange={e=>setShowGrid(e.target.checked)}/>グリッド</label>
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/>スナップ</label>
+                  <label className="inline-flex items-center gap-2 col-span-1"><input type="checkbox" checked={canvas.grid} onChange={e=>setCanvas(s=>({...s,grid:e.target.checked}))}/>グリッド</label>
+                  <label className="inline-flex items-center gap-2 col-span-1"><input type="checkbox" checked={canvas.snap} onChange={e=>setCanvas(s=>({...s,snap:e.target.checked}))}/>スナップ</label>
                 </div>
               </div>
 
@@ -389,49 +419,110 @@
 
               <div className="space-y-3">
                 <h3 className="font-medium">書き出し</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="text-sm text-gray-600">形式
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <label>形式
                     <select className="select w-full" value={exportFormat} onChange={e=>setExportFormat(e.target.value)}>
                       <option value="png">PNG（可逆・高画質）</option>
                       <option value="jpeg">JPEG（品質指定）</option>
                       <option value="webp">WebP（品質指定）</option>
                     </select>
                   </label>
-                  <label className="text-sm text-gray-600">スケール
+                  <label>スケール
                     <select className="select w-full" value={exportScale} onChange={e=>setExportScale(parseFloat(e.target.value))}>
-                      <option value="1">1x（等倍）</option>
+                      <option value="1">1x</option>
                       <option value="1.5">1.5x</option>
                       <option value="2">2x</option>
                       <option value="3">3x</option>
                     </select>
                   </label>
-                  {(exportFormat!=='png') && (
-                    <label className="text-sm text-gray-600 col-span-2">画質（{Math.round(exportQuality*100)}%）
+                  {exportFormat!=='png' && (
+                    <label className="col-span-2">画質（{Math.round(exportQuality*100)}%）
                       <input type="range" min="0.5" max="1" step="0.01" value={exportQuality} onChange={e=>setExportQuality(parseFloat(e.target.value))} className="w-full" />
                     </label>
                   )}
                 </div>
-                <button className="btn btn-primary w-full" onClick={exportImage}>書き出し</button>
+                <button className="btn primary w-full" onClick={exportImage}
+                        onMouseEnter={(e)=>show('編集ビューの見た目で書き出し',e)} onMouseMove={move} onMouseLeave={hide}>書き出し</button>
               </div>
             </aside>
 
-            {/* 中: 編集ワークスペース */}
-            <section className="space-y-3">
-              <h2 className="text-sm text-gray-500">編集ワークスペース</h2>
-              <div ref={editorRef} className="relative" style={{width:canvasSize.w/2, height:canvasSize.h/2}} onMouseMove={onMouseMoveEditor} onMouseUp={onMouseUpEditor}>
-                <EditorCanvas/>
+            {/* 中央：ツールバー + キャンバス（編集＝出力） */}
+            <main className="space-y-3">
+              <div className="card p-3 flex flex-wrap items-center gap-2 text-sm">
+                <div className="flex items-center gap-1">
+                  <button className="btn tap" onClick={()=>bringForward()} onMouseEnter={(e)=>show('前面へ',e)} onMouseMove={move} onMouseLeave={hide}>前面</button>
+                  <button className="btn tap" onClick={()=>sendBackward()} onMouseEnter={(e)=>show('背面へ',e)} onMouseMove={move} onMouseLeave={hide}>背面</button>
+                  <button className="btn tap" onClick={()=>removeSelected()} onMouseEnter={(e)=>show('選択を削除',e)} onMouseMove={move} onMouseLeave={hide}>削除</button>
+                </div>
+                <div className="h-6 w-px bg-gray-200"/>
+                <div className="flex items-center gap-1">
+                  <button className="btn tap" onClick={()=>align('left')} onMouseEnter={(e)=>show('左に揃える',e)} onMouseMove={move} onMouseLeave={hide}>左揃え</button>
+                  <button className="btn tap" onClick={()=>align('centerX')} onMouseEnter={(e)=>show('中央（左右）',e)} onMouseMove={move} onMouseLeave={hide}>中央X</button>
+                  <button className="btn tap" onClick={()=>align('right')} onMouseEnter={(e)=>show('右に揃える',e)} onMouseMove={move} onMouseLeave={hide}>右揃え</button>
+                  <button className="btn tap" onClick={()=>align('top')} onMouseEnter={(e)=>show('上に揃える',e)} onMouseMove={move} onMouseLeave={hide}>上揃え</button>
+                  <button className="btn tap" onClick={()=>align('centerY')} onMouseEnter={(e)=>show('中央（上下）',e)} onMouseMove={move} onMouseLeave={hide}>中央Y</button>
+                  <button className="btn tap" onClick={()=>align('bottom')} onMouseEnter={(e)=>show('下に揃える',e)} onMouseMove={move} onMouseLeave={hide}>下揃え</button>
+                </div>
+                <div className="h-6 w-px bg-gray-200"/>
+                <div className="flex items-center gap-1">
+                  <button className="btn tap" onClick={()=>distribute('x')} onMouseEnter={(e)=>show('等間隔に配布（横）',e)} onMouseMove={move} onMouseLeave={hide}>分布X</button>
+                  <button className="btn tap" onClick={()=>distribute('y')} onMouseEnter={(e)=>show('等間隔に配布（縦）',e)} onMouseMove={move} onMouseLeave={hide}>分布Y</button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <button className="btn" onClick={()=>addTextLayer('新しいテキスト')}>テキスト追加</button>
-              </div>
-            </section>
 
-            {/* 右: ビュースペース（最終出力見た目） */}
-            <section className="space-y-3">
-              <h2 className="text-sm text-gray-500">ビュースペース（出力イメージ）</h2>
-              <ViewCanvas/>
-            </section>
+              <div className="card relative overflow-hidden">
+                <div className="p-3 flex items-center justify-between text-sm text-gray-600">
+                  <div>編集キャンバス（{canvas.w}×{canvas.h}）</div>
+                  <div>操作：ドラッグ移動 / 角ハンドルでリサイズ / Shiftで等比 / 矢印キーで微調整（Shiftで×10） / Ctrl/⌘やShiftで複数選択</div>
+                </div>
+                <div className="relative mx-auto checker" style={{width:canvas.w, height:canvas.h}} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+                  <div className={`absolute inset-0 ${canvas.grid? 'grid-bg':''}`} />
+                  {/* スナップガイド */}
+                  <Guides/>
+
+                  {/* レイヤー描画 */}
+                  {layers.map(l=> (
+                    <div key={l.id} className={`absolute ${selectedIds.includes(l.id)? 'select-ring':''}`} style={{left:l.x, top:l.y, width:l.width, height:l.height, opacity:l.opacity, display:l.visible? 'block':'none'}} onPointerDown={(e)=>onPointerDownLayer(e,l)}>
+                      {l.type==='photo' && (
+                        <img src={l.url} draggable={false} className="w-full h-full object-cover"/>
+                      )}
+                      {l.type==='text' && (
+                        <div className="text-layer w-full h-full" contentEditable suppressContentEditableWarning spellCheck
+                             style={{color:l.color, fontSize:`${l.fontSize}px`, lineHeight:l.line, textAlign:l.align, textDecoration:l.underline? 'underline':'none', fontStyle:l.italic? 'italic':'normal', fontWeight:l.weight}}
+                             onInput={(e)=>onTextInput(l.id,e)}>
+                          {l.text}
+                        </div>
+                      )}
+                      {/* リサイズハンドル（単一選択時のみ） */}
+                      {selectedIds.length===1 && selectedIds[0]===l.id && (
+                        <>
+                          <div className="handle nw" onPointerDown={(e)=>onPointerDownLayer(e,l,'nw')} onMouseEnter={(e)=>show('左上リサイズ（Shiftで等比）',e)} onMouseMove={move} onMouseLeave={hide}></div>
+                          <div className="handle ne" onPointerDown={(e)=>onPointerDownLayer(e,l,'ne')} onMouseEnter={(e)=>show('右上リサイズ（Shiftで等比）',e)} onMouseMove={move} onMouseLeave={hide}></div>
+                          <div className="handle sw" onPointerDown={(e)=>onPointerDownLayer(e,l,'sw')} onMouseEnter={(e)=>show('左下リサイズ（Shiftで等比）',e)} onMouseMove={move} onMouseLeave={hide}></div>
+                          <div className="handle se" onPointerDown={(e)=>onPointerDownLayer(e,l,'se')} onMouseEnter={(e)=>show('右下リサイズ（Shiftで等比）',e)} onMouseMove={move} onMouseLeave={hide}></div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </main>
+
+            {/* 右サイド（補助ヒントなど、狭い画面では非表示） */}
+            <aside className="hidden xl:block card p-4 space-y-3">
+              <h3 className="font-medium">ヒント</h3>
+              <ul className="text-sm text-gray-600 list-disc pl-4 space-y-1">
+                <li>画像を追加すると、既存の写真の<strong>下</strong>に自動配置されます。</li>
+                <li>Shiftを押しながらリサイズで<strong>等比</strong>維持。</li>
+                <li>Ctrl/⌘やShiftで<strong>複数選択</strong>、ツールバーで<strong>整列/分布</strong>。</li>
+                <li>矢印キーで<strong>1px</strong>、Shift+矢印で<strong>10px</strong>移動。</li>
+                <li>スナップはグリッド・オブジェクト・キャンバス<strong>端/中心</strong>に吸着。</li>
+              </ul>
+            </aside>
           </div>
+
+          {/* ホバー・ツールチップ */}
+          {tip && (<div className="tooltip" style={{left:tip.x, top:tip.y}}>{tip.text}</div>)}
         </div>
       );
     }
@@ -440,4 +531,3 @@
   </script>
 </body>
 </html>
-
