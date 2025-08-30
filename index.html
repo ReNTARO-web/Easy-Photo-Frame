@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Exifフレームエディタ</title>
-  <!-- React 17 & Babel -->
+  <!-- React & Babel -->
   <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -22,6 +22,8 @@
     body { font-family: 'CorporateLogo', -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; }
     .draggable { position:absolute; cursor:move; }
     .editable-text { white-space: pre-wrap; text-align: center; }
+    .resize-handle { width:10px; height:10px; background:#2563eb; position:absolute; right:-5px; bottom:-5px; cursor:se-resize; }
+    .grid-line { position:absolute; background:#e5e7eb; }
   </style>
 </head>
 <body class="bg-gray-100">
@@ -42,21 +44,13 @@
       const [ratio,setRatio] = useState("Instagram (1:1)");
       const [objects,setObjects] = useState([]);
       const [editingId,setEditingId] = useState(null);
+      const [selectedId,setSelectedId] = useState(null);
       const containerRef = useRef(null);
       const [cw,ch] = aspectRatios[ratio];
-      const snapThreshold = 8;
+      const snapSize = 50; // グリッド間隔
 
-      // スナップ
-      const snapValue = (val, size, frameSize, others=[]) => {
-        const targets = [
-          0, frameSize/2 - size/2, frameSize - size,
-          ...others
-        ];
-        for(let t of targets){
-          if(Math.abs(val - t) < snapThreshold) return t;
-        }
-        return val;
-      };
+      // スナップ（グリッドに吸着）
+      const snapToGrid = (val)=> Math.round(val / snapSize) * snapSize;
 
       // 画像アップロード
       const handleUpload = (e)=>{
@@ -77,7 +71,7 @@
             setObjects(prev=>[
               ...prev,
               {id:Date.now()+idx, type:"image", url, x:cw/2-150, y:ch/2-100, w:300, h:200},
-              {id:Date.now()+idx+1000, type:"text", content:textContent, x:cw/2-100, y:ch/2+120, w:200, h:60, bold:true, color:"#000", size:16}
+              {id:Date.now()+idx+1000, type:"text", content:textContent, x:cw/2-100, y:ch/2+120, w:200, h:60, bold:true, color:"#000", size:16, italic:false, underline:false}
             ]);
           });
         });
@@ -93,10 +87,32 @@
         const move = (ev)=>{
           const dx = ev.clientX - startX;
           const dy = ev.clientY - startY;
-          const otherObjs = objects.filter(o=>o.id!==id).map(o=>[o.x,o.x+o.w/2,o.x+o.w]);
-          const newX = snapValue(initX+dx, obj.w, cw, otherObjs.flat());
-          const newY = snapValue(initY+dy, obj.h, ch, []);
+          const newX = snapToGrid(initX+dx);
+          const newY = snapToGrid(initY+dy);
           setObjects(prev=>prev.map(o=>o.id===id?{...o,x:newX,y:newY}:o));
+        };
+        const up = ()=>{
+          window.removeEventListener("mousemove",move);
+          window.removeEventListener("mouseup",up);
+        };
+        window.addEventListener("mousemove",move);
+        window.addEventListener("mouseup",up);
+      };
+
+      // サイズ変更
+      const onResize = (id,e)=>{
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const obj = objects.find(o=>o.id===id);
+        const initW = obj.w;
+        const initH = obj.h;
+        const move = (ev)=>{
+          const dw = ev.clientX - startX;
+          const dh = ev.clientY - startY;
+          const newW = Math.max(30,snapToGrid(initW+dw));
+          const newH = Math.max(20,snapToGrid(initH+dh));
+          setObjects(prev=>prev.map(o=>o.id===id?{...o,w:newW,h:newH}:o));
         };
         const up = ()=>{
           window.removeEventListener("mousemove",move);
@@ -108,11 +124,32 @@
 
       // 保存
       const saveAsImage = async ()=>{
+        const handles = document.querySelectorAll(".resize-handle");
+        handles.forEach(h=>h.style.display="none");
         const canvas = await html2canvas(containerRef.current,{scale:2});
         const link = document.createElement("a");
         link.download="workspace.png";
         link.href = canvas.toDataURL("image/png");
         link.click();
+        handles.forEach(h=>h.style.display="block");
+      };
+
+      // テキスト編集ツールバー
+      const toolbar = ()=>{
+        const obj = objects.find(o=>o.id===selectedId);
+        if(!obj || obj.type!=="text") return null;
+        return (
+          <div className="fixed right-4 top-20 bg-white border shadow p-2 flex flex-col space-y-2">
+            <button onClick={()=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,bold:!o.bold}:o))}
+              className={`${obj.bold?"bg-gray-300":""}`}>B</button>
+            <button onClick={()=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,italic:!o.italic}:o))}
+              className={`${obj.italic?"bg-gray-300":""}`}>I</button>
+            <button onClick={()=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,underline:!o.underline}:o))}
+              className={`${obj.underline?"bg-gray-300":""}`}>U</button>
+            <input type="color" value={obj.color} onChange={(e)=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,color:e.target.value}:o))}/>
+            <input type="number" value={obj.size} onChange={(e)=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,size:parseInt(e.target.value)}:o))}/>
+          </div>
+        );
       };
 
       return (
@@ -130,24 +167,37 @@
 
           <div ref={containerRef} className="relative bg-white border shadow"
             style={{width:cw,height:ch}}>
+            {/* グリッド線 */}
+            {[...Array(Math.floor(cw/snapSize))].map((_,i)=>(
+              <div key={`v${i}`} className="grid-line" style={{left:i*snapSize,top:0,width:1,height:ch}}/>
+            ))}
+            {[...Array(Math.floor(ch/snapSize))].map((_,i)=>(
+              <div key={`h${i}`} className="grid-line" style={{top:i*snapSize,left:0,height:1,width:cw}}/>
+            ))}
+            {/* オブジェクト */}
             {objects.map(o=>(
               editingId===o.id ? (
                 <textarea key={o.id} autoFocus value={o.content}
                   onChange={(e)=>setObjects(prev=>prev.map(x=>x.id===o.id?{...x,content:e.target.value}:x))}
-                  onBlur={()=>setEditingId(null)}
+                  onBlur={()=>{setEditingId(null); setSelectedId(o.id);}}
                   onKeyDown={(e)=>{if(e.key==="Enter"){e.preventDefault();setEditingId(null);}}}
-                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray",textAlign:"center",fontFamily:"CorporateLogo",fontSize:o.size,color:o.color,fontWeight:o.bold?"bold":"normal"}}
+                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray",textAlign:"center",fontFamily:"CorporateLogo",fontSize:o.size,color:o.color,fontWeight:o.bold?"bold":"normal",fontStyle:o.italic?"italic":"normal",textDecoration:o.underline?"underline":"none"}}
                 />
               ) : (
                 <div key={o.id}
-                  className="draggable flex items-center justify-center"
-                  style={{left:o.x,top:o.y,width:o.w,height:o.h,textAlign:"center",position:"absolute"}}
-                  onMouseDown={(e)=>{ if(e.detail===1) onDrag(o.id,e); }}
+                  className="draggable"
+                  style={{left:o.x,top:o.y,width:o.w,height:o.h,position:"absolute"}}
+                  onMouseDown={(e)=>{ if(e.detail===1) onDrag(o.id,e); setSelectedId(o.id); }}
                   onDoubleClick={()=>setEditingId(o.id)}
                 >
-                  {o.type==="image" ? <img src={o.url} className="w-full h-full object-contain"/> :
+                  {o.type==="image" ? 
+                    <div className="w-full h-full relative">
+                      <img src={o.url} className="w-full h-full object-contain"/>
+                      <div className="resize-handle" onMouseDown={(e)=>onResize(o.id,e)}></div>
+                    </div>
+                  :
                     <div className="editable-text w-full h-full flex flex-col justify-center"
-                      style={{fontFamily:"CorporateLogo",fontSize:o.size,color:o.color,fontWeight:o.bold?"bold":"normal"}}>
+                      style={{fontFamily:"CorporateLogo",fontSize:o.size,color:o.color,fontWeight:o.bold?"bold":"normal",fontStyle:o.italic?"italic":"normal",textDecoration:o.underline?"underline":"none"}}>
                       {o.content}
                     </div>
                   }
@@ -155,6 +205,7 @@
               )
             ))}
           </div>
+          {toolbar()}
         </div>
       );
     }
