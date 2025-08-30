@@ -74,26 +74,35 @@ header {
 /* レイヤーの共通スタイル */
 .layer {
     position: absolute;
-    cursor: grab;
-    z-index: 100; /* ドラッグ順序を調整するため */
+    z-index: 100;
 }
 
-/* アクティブなレイヤーの枠線 */
 .layer.active {
     border: 1px solid blue;
-}
-
-#uploadedImage {
-    display: block;
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
+    cursor: grab;
 }
 
 .text-layer {
     padding: 5px;
-    outline: none; /* テキスト編集時の枠線を非表示に */
-    white-space: pre; /* テキストの改行を保持 */
+    outline: none;
+    white-space: pre;
+    font-size: 14px;
+    color: #333;
+}
+
+.image-frame {
+    background-color: white; /* 白いフレーム */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px; /* フレームの幅 */
+}
+
+#frameImage {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
 }
 
 /* リサイズハンドル */
