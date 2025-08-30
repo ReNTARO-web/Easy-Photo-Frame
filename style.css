@@ -1,165 +1,333 @@
-body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background-color: #f0f2f5;
-    color: #333;
-}
+document.addEventListener('DOMContentLoaded', () => {
+    const imageUpload = document.getElementById('imageUpload');
+    const addTextButton = document.getElementById('addTextButton');
+    const exportButton = document.getElementById('exportButton');
+    const canvasContainer = document.getElementById('canvasContainer');
+    const mainFrame = document.getElementById('mainFrame');
+    const mainImage = document.getElementById('mainImage');
+    const snapGuides = document.getElementById('snapGuides');
+    const layerList = document.getElementById('layerList');
+    const frameColorInput = document.getElementById('frameColor');
+    const textColorInput = document.getElementById('textColor');
+    const aspectRatioButtons = document.querySelectorAll('.aspect-btn');
 
-#app {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-}
+    let layers = [];
+    let activeLayer = null;
 
-header {
-    background-color: #ffffff;
-    padding: 10px 20px;
-    border-bottom: 1px solid #ddd;
-    display: flex;
-    align-items: center;
-    gap: 20px;
-}
+    // --- 1. レイヤー管理とアクティブ化 ---
+    const activateLayer = (layerElement) => {
+        if (activeLayer) {
+            activeLayer.classList.remove('active');
+            if (activeLayer.classList.contains('text-layer')) {
+                activeLayer.setAttribute('contenteditable', 'false');
+            }
+        }
+        activeLayer = layerElement;
+        activeLayer.classList.add('active');
+        updateSnapGuides();
+        updateLayerList();
+    };
 
-#editorContainer {
-    display: flex;
-    flex-grow: 1;
-    background-color: #f8f9fa;
-}
+    const updateLayerList = () => {
+        layerList.innerHTML = '';
+        layers.forEach((layer, index) => {
+            const li = document.createElement('li');
+            li.classList.add('layer-item');
+            if (layer === activeLayer) {
+                li.classList.add('active');
+            }
+            const layerName = layer.dataset.name || `レイヤー ${layers.length - index}`;
+            li.textContent = layerName;
+            li.addEventListener('click', () => {
+                activateLayer(layer);
+            });
+            layerList.prepend(li);
+        });
+    };
 
-#canvasContainer {
-    flex-grow: 1;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
-    position: relative;
-    background-color: #e9ecef;
-    border: 1px dashed #ccc;
-    margin: 20px;
-    background-image: linear-gradient(to right, #ccc 1px, transparent 1px), linear-gradient(to bottom, #ccc 1px, transparent 1px);
-    background-size: 25px 25px; /* グリッド線のサイズ */
-}
+    // --- 2. アスペクト比の変更 ---
+    aspectRatioButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            aspectRatioButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            const ratio = parseFloat(button.dataset.ratio);
+            if (mainFrame.style.display !== 'none') {
+                const currentWidth = mainFrame.offsetWidth;
+                mainFrame.style.height = `${currentWidth * ratio}px`;
+                mainFrame.style.transform = `scale(1)`;
+                centerFrame();
+            }
+        });
+    });
 
-#sidebar {
-    width: 250px;
-    background-color: #ffffff;
-    border-left: 1px solid #ddd;
-    padding: 20px;
-    box-shadow: -2px 0 5px rgba(0,0,0,0.05);
-    overflow-y: auto;
-}
+    const centerFrame = () => {
+        const containerWidth = canvasContainer.offsetWidth;
+        const containerHeight = canvasContainer.offsetHeight;
+        const frameWidth = mainFrame.offsetWidth;
+        const frameHeight = mainFrame.offsetHeight;
+        mainFrame.style.left = `${(containerWidth - frameWidth) / 2}px`;
+        mainFrame.style.top = `${(containerHeight - frameHeight) / 2}px`;
+        updateSnapGuides();
+    };
 
-/* アスペクト比ボタン */
-.aspect-ratio-buttons {
-    display: flex;
-    gap: 5px;
-    margin-bottom: 20px;
-}
-.aspect-btn {
-    flex: 1;
-    padding: 8px;
-    border: 1px solid #ccc;
-    background-color: #f8f8f8;
-    cursor: pointer;
-}
-.aspect-btn.active {
-    background-color: #007bff;
-    color: #fff;
-    border-color: #007bff;
-}
+    // --- 3. 画像のアップロードとフレームへの配置 ---
+    imageUpload.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const image = new Image();
+                image.src = e.target.result;
+                image.onload = () => {
+                    // EXIF情報の取得
+                    EXIF.getData(image, function() {
+                        const exifData = EXIF.getAllTags(this);
+                        const exifText = formatExifData(exifData);
+                        
+                        // メインフレームに画像をセット
+                        mainImage.src = image.src;
+                        mainFrame.style.display = 'block';
+                        
+                        // デフォルトのアスペクト比に設定
+                        const activeRatio = document.querySelector('.aspect-btn.active').dataset.ratio;
+                        const initialRatio = parseFloat(activeRatio);
+                        const initialWidth = canvasContainer.offsetWidth * 0.8;
+                        mainFrame.style.width = `${initialWidth}px`;
+                        mainFrame.style.height = `${initialWidth * initialRatio}px`;
+                        centerFrame();
+                        
+                        // 既存のレイヤーをクリア
+                        layers = [mainFrame];
+                        
+                        // EXIFテキストレイヤーの追加とグループ化
+                        if (exifText) {
+                            const textLayer = addText(exifText);
+                            textLayer.style.width = '100%';
+                            
+                            // グループ化されたレイヤーとして初期位置を調整
+                            const groupCenterX = mainFrame.offsetLeft + mainFrame.offsetWidth / 2;
+                            const groupCenterY = mainFrame.offsetTop + mainFrame.offsetHeight / 2;
+                            
+                            mainFrame.style.left = `${groupCenterX - mainFrame.offsetWidth / 2}px`;
+                            mainFrame.style.top = `${groupCenterY - mainFrame.offsetHeight / 2}px`;
+                            
+                            textLayer.style.left = `${mainFrame.offsetLeft}px`;
+                            textLayer.style.top = `${mainFrame.offsetTop + mainFrame.offsetHeight + 10}px`;
+                            
+                            layers.push(textLayer);
+                        }
+                        
+                        activateLayer(mainFrame);
+                    });
+                };
+            };
+            reader.readAsDataURL(file);
+        }
+    });
 
-#layerList {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
+    const formatExifData = (data) => {
+        let text = '';
+        if (data.Make && data.Model) {
+            text += `カメラ: ${data.Make} ${data.Model}\n`;
+        }
+        if (data.FocalLength) {
+            text += `焦点距離: ${data.FocalLength.numerator / data.FocalLength.denominator}mm\n`;
+        }
+        if (data.FNumber) {
+            text += `絞り: f/${data.FNumber.numerator / data.FNumber.denominator}\n`;
+        }
+        if (data.ISOSpeedRatings) {
+            text += `ISO感度: ${data.ISOSpeedRatings}\n`;
+        }
+        if (data.ExposureTime) {
+            text += `シャッタースピード: ${data.ExposureTime.numerator}/${data.ExposureTime.denominator}s\n`;
+        }
+        return text.trim();
+    };
 
-.layer-item {
-    padding: 10px;
-    border-bottom: 1px solid #eee;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.layer-item:hover {
-    background-color: #f0f0f0;
-}
-.layer-item.active {
-    background-color: #e0e0e0;
-    border-left: 3px solid #007bff;
-}
+    // --- 4. テキストの追加と詳細設定 ---
+    const addText = (initialText = 'テキストを入力') => {
+        const textLayer = document.createElement('div');
+        textLayer.classList.add('layer', 'text-layer');
+        textLayer.setAttribute('contenteditable', 'true');
+        textLayer.textContent = initialText;
+        textLayer.style.color = textColorInput.value;
+        canvasContainer.appendChild(textLayer);
+        layers.push(textLayer);
+        textLayer.dataset.name = `テキスト ${layers.filter(l => l.classList.contains('text-layer')).length}`;
+        activateLayer(textLayer);
+        textLayer.focus();
+        return textLayer;
+    };
+    addTextButton.addEventListener('click', () => addText());
 
-/* レイヤーの共通スタイル */
-.layer {
-    position: absolute;
-    z-index: 100;
-}
-.layer.active {
-    border: 1px solid blue;
-    cursor: grab;
-}
+    frameColorInput.addEventListener('input', (e) => {
+        mainFrame.style.backgroundColor = e.target.value;
+    });
 
-#mainFrame {
-    background-color: white;
-    box-sizing: content-box;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 20px;
-    position: relative;
-}
+    textColorInput.addEventListener('input', (e) => {
+        if (activeLayer && activeLayer.classList.contains('text-layer')) {
+            activeLayer.style.color = e.target.value;
+        }
+    });
+    
+    // --- 5. ドラッグ、リサイズ、スナップのイベント管理 ---
+    let isDragging = false;
+    let isResizing = false;
+    let resizeHandle = null;
+    let initialX, initialY, initialLeft, initialTop, initialWidth, initialHeight;
+    let initialLayerState = new Map();
 
-.image-layer {
-    cursor: move;
-}
-#mainImage {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
+    canvasContainer.addEventListener('mousedown', (e) => {
+        const targetLayer = e.target.closest('.layer');
+        if (!targetLayer) {
+            if (activeLayer) {
+                activeLayer.classList.remove('active');
+                activeLayer = null;
+                updateSnapGuides();
+                updateLayerList();
+            }
+            return;
+        }
+        
+        activateLayer(targetLayer);
+        
+        if (e.target.classList.contains('resize-handle')) {
+            isResizing = true;
+            resizeHandle = e.target;
+            initialWidth = targetLayer.offsetWidth;
+            initialHeight = targetLayer.offsetHeight;
+            initialX = e.clientX;
+            initialY = e.clientY;
+            e.preventDefault();
+            return;
+        }
+        
+        isDragging = true;
+        initialX = e.clientX;
+        initialY = e.clientY;
+        
+        initialLayerState.clear();
+        layers.forEach(layer => {
+            initialLayerState.set(layer, {
+                left: layer.offsetLeft,
+                top: layer.offsetTop,
+                width: layer.offsetWidth,
+                height: layer.offsetHeight
+            });
+        });
+        
+        targetLayer.style.cursor = 'grabbing';
+    });
 
-.text-layer {
-    padding: 5px;
-    outline: none;
-    white-space: pre;
-    font-size: 14px;
-}
+    canvasContainer.addEventListener('mousemove', (e) => {
+        if (!activeLayer) return;
 
-/* リサイズハンドル */
-.resize-handle {
-    position: absolute;
-    width: 12px;
-    height: 12px;
-    background: #007bff;
-    border: 1px solid #fff;
-    border-radius: 50%;
-    z-index: 200;
-}
-.top-left { top: -6px; left: -6px; cursor: nwse-resize; }
-.top-right { top: -6px; right: -6px; cursor: nesw-resize; }
-.bottom-left { bottom: -6px; left: -6px; cursor: nesw-resize; }
-.bottom-right { bottom: -6px; right: -6px; cursor: nwse-resize; }
+        if (isResizing) {
+            const dx = e.clientX - initialX;
+            const dy = e.clientY - initialY;
+            
+            let newWidth = initialWidth;
+            let newHeight = initialHeight;
+            let newLeft = activeLayer.offsetLeft;
+            let newTop = activeLayer.offsetTop;
 
-/* スナップガイド */
-#snapGuides {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-}
-.snap-line {
-    background-color: rgba(255, 0, 0, 0.5);
-    position: absolute;
-    z-index: 1000;
-}
-.snap-line.horizontal {
-    width: 100%;
-    height: 1px;
-}
-.snap-line.vertical {
-    width: 1px;
-    height: 100%;
-}
+            // リサイズロジック
+            // ... (前回のコードのリサイズロジックをここに移植) ...
+
+            if (activeLayer.classList.contains('image-layer')) {
+                // 画像レイヤーの場合、縦横比を維持
+                const originalRatio = initialWidth / initialHeight;
+                if (Math.abs(newWidth / newHeight - originalRatio) > 0.01) {
+                    if (newWidth / initialWidth > newHeight / initialHeight) {
+                        newHeight = newWidth / originalRatio;
+                    } else {
+                        newWidth = newHeight * originalRatio;
+                    }
+                }
+            }
+
+            if (newWidth > 50 && newHeight > 50) {
+                activeLayer.style.width = `${newWidth}px`;
+                activeLayer.style.height = `${newHeight}px`;
+                activeLayer.style.left = `${newLeft}px`;
+                activeLayer.style.top = `${newTop}px`;
+            }
+
+            updateSnapGuides();
+            return;
+        }
+
+        if (isDragging) {
+            const dx = e.clientX - initialX;
+            const dy = e.clientY - initialY;
+            
+            if (activeLayer === mainFrame || (activeLayer.classList.contains('text-layer') && mainFrame.style.display !== 'none')) {
+                // フレームまたはフレーム内のテキストをドラッグした場合、グループで移動
+                layers.forEach(layer => {
+                    const initialState = initialLayerState.get(layer);
+                    if (initialState) {
+                        layer.style.left = `${initialState.left + dx}px`;
+                        layer.style.top = `${initialState.top + dy}px`;
+                    }
+                });
+            } else {
+                // 単一のレイヤーを移動
+                const initialState = initialLayerState.get(activeLayer);
+                activeLayer.style.left = `${initialState.left + dx}px`;
+                activeLayer.style.top = `${initialState.top + dy}px`;
+            }
+
+            updateSnapGuides();
+        }
+    });
+
+    canvasContainer.addEventListener('mouseup', () => {
+        isDragging = false;
+        isResizing = false;
+        if (activeLayer) {
+            activeLayer.style.cursor = 'grab';
+        }
+    });
+
+    // --- 6. 高画質エクスポート ---
+    exportButton.addEventListener('click', () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const scale = 2; // 高画質化のためのスケール
+        
+        const frameWidth = mainFrame.offsetWidth;
+        const frameHeight = mainFrame.offsetHeight;
+        
+        canvas.width = frameWidth * scale;
+        canvas.height = frameHeight * scale;
+        
+        ctx.fillStyle = mainFrame.style.backgroundColor || 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const image = new Image();
+        image.src = mainImage.src;
+        image.onload = () => {
+            const imageX = (frameWidth - mainImage.offsetWidth) / 2 * scale;
+            const imageY = (frameHeight - mainImage.offsetHeight) / 2 * scale;
+            ctx.drawImage(image, imageX, imageY, mainImage.offsetWidth * scale, mainImage.offsetHeight * scale);
+
+            layers.forEach(layer => {
+                if (layer.classList.contains('text-layer')) {
+                    const textContent = layer.textContent;
+                    const textX = (layer.offsetLeft - mainFrame.offsetLeft) * scale;
+                    const textY = (layer.offsetTop - mainFrame.offsetTop) * scale;
+                    
+                    ctx.font = `${parseInt(window.getComputedStyle(layer).fontSize) * scale}px Arial`;
+                    ctx.fillStyle = layer.style.color || 'black';
+                    ctx.fillText(textContent, textX, textY);
+                }
+            });
+
+            const link = document.createElement('a');
+            link.download = 'framed_image.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        };
+    });
+});
