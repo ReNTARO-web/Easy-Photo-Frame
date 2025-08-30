@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>確実に動く Exif フレームエディタ（Grid/Snap/Text Toolbar）</title>
 
-<!-- exif-js for metadata -->
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 
 <style>
@@ -17,8 +16,9 @@ html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hel
 .container{max-width:1400px;margin:18px auto;padding:16px;display:grid;grid-template-columns:320px 1fr 260px;gap:12px;align-items:start}
 .card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(8,20,40,0.04)}
 .h{font-weight:700;margin-bottom:8px}
-.btn{border:1px solid var(--grid);background:#fff;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px}
+.btn{border:1px solid var(--grid);background:#fff;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;transition:background 0.2s, color 0.2s}
 .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.active, .btn:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
 .small{font-size:13px;color:var(--muted)}
 .layer-list{max-height:38vh;overflow:auto}
 .layer-row{display:flex;gap:8px;align-items:center;padding:8px;border-radius:8px}
@@ -46,7 +46,6 @@ input[type="number"]{width:72px}
 <body>
 <div class="container">
 
-  <!-- LEFT: controls -->
   <div class="card">
     <div class="h">ツール</div>
 
@@ -86,7 +85,6 @@ input[type="number"]{width:72px}
     </div>
   </div>
 
-  <!-- MIDDLE: canvas -->
   <div class="card canvas-area" style="align-items:center">
     <div style="display:flex;justify-content:space-between;width:100%">
       <div id="canvasInfo" class="small">キャンバス</div>
@@ -98,7 +96,6 @@ input[type="number"]{width:72px}
     </div>
   </div>
 
-  <!-- RIGHT: toolbar (shown when a text layer selected) -->
   <div id="toolbar" class="toolbar" style="display:none">
     <div class="row">
       <button id="tbBold" class="btn">B</button>
@@ -128,12 +125,12 @@ input[type="number"]{width:72px}
 
 <script>
 /* =========================
-   Pure Vanilla JS App
-   - Grid snap (grid + edges + centers)
-   - Text toolbar (Word-like): bold/italic/underline/size/color/align/font
-   - Image drag + resize (shift = aspect lock)
-   - Offscreen canvas export (no handles)
-   ========================= */
+    Pure Vanilla JS App
+    - Grid snap (grid + edges + centers)
+    - Text toolbar (Word-like): bold/italic/underline/size/color/align/font
+    - Image drag + resize (shift = aspect lock)
+    - Offscreen canvas export (no handles)
+    ========================= */
 
 (() => {
   // Config
@@ -147,7 +144,7 @@ input[type="number"]{width:72px}
   let canvasW = 1080, canvasH = 1080;
   let displayScale = 1;
   let gridOn = true, snapOn = true, handlesVisible = true;
-  let gridSize = 50; // grid spacing
+  let gridSize = 108; // grid spacing (1080 / 10)
   const SNAP_RANGE = 10; // px threshold for snap
   let shiftDown = false;
   let loadedFontName = null;
@@ -229,6 +226,8 @@ input[type="number"]{width:72px}
     const p = PRESETS.find(x => x.key === key);
     if (!p) return;
     canvasW = p.w; canvasH = p.h;
+    // 短い辺を10分割してグリッドサイズを設定
+    gridSize = Math.min(canvasW, canvasH) / 10;
     // mark active
     Array.from(presetRow.children).forEach(b => b.classList.toggle('active', b.textContent === p.label));
     updateScale();
@@ -257,29 +256,29 @@ input[type="number"]{width:72px}
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
-        const natW = img.naturalWidth || canvasW;
-        const natH = img.naturalHeight || canvasH;
-        const baseW = Math.min(Math.max(360, Math.round(canvasW * 0.45)), natW || Math.round(canvasW * 0.6));
-        const ratio = (natW && natH) ? (natW / natH) : (16/9);
-        const baseH = Math.round(baseW / ratio);
-        // center placement
-        const x = Math.round((canvasW - baseW) / 2);
-        const y = Math.round((canvasH - baseH) / 2);
-        const layer = { id: uid(), type: 'photo', name: 'Photo', visible: true, x, y, width: baseW, height: baseH, url };
+        // 画像を枠いっぱいに拡大して中央配置
+        const layer = { id: uid(), type: 'photo', name: 'Photo', visible: true, x: 0, y: 0, width: canvasW, height: canvasH, url };
         layers.push(layer);
         // EXIF text
         try {
           EXIF.getData(file, function () {
             const make = EXIF.getTag(this, 'Make') || '';
             const model = EXIF.getTag(this, 'Model') || '';
+            const lensModel = EXIF.getTag(this, 'LensModel') || ''; // LensModel追加
             const iso = EXIF.getTag(this, 'ISOSpeedRatings') || '';
             const exposure = EXIF.getTag(this, 'ExposureTime') || '';
             const focal = EXIF.getTag(this, 'FocalLength') || '';
-            const meta = [ [make, model].filter(Boolean).join(' '), [focal ? `${focal}mm` : '', exposure ? `${exposure}s` : '', iso ? `ISO ${iso}` : ''].filter(Boolean).join(' | ') ].filter(Boolean).join('\n');
+            
+            const meta = [
+              [make, model].filter(Boolean).join(' '),
+              lensModel,
+              [focal ? `${focal}mm` : '', exposure ? `${exposure}s` : '', iso ? `ISO ${iso}` : ''].filter(Boolean).join(' | ')
+            ].filter(Boolean).join('\n');
+            
             if (meta) {
               const txW = Math.min(600, canvasW - 80);
               const txX = Math.round((canvasW - txW) / 2);
-              const txY = Math.min(canvasH - 60, layer.y + layer.height + 8);
+              const txY = canvasH - 60; // キャンバスの下部に配置
               const tLayer = { id: uid(), type: 'text', name: 'EXIF', visible: true, x: txX, y: txY, width: txW, height: 60, text: meta, fontSize: 18, lineHeight: 1.2, align: 'center', color: '#111', boldFirstLine: true };
               layers.push(tLayer);
             }
@@ -348,18 +347,31 @@ input[type="number"]{width:72px}
         t.style.lineHeight = (l.lineHeight || 1.3);
         t.style.color = l.color || '#111';
         t.style.textAlign = l.align || 'center';
+        t.style.fontStyle = l.italic ? 'italic' : 'normal';
+        t.style.textDecoration = l.underline ? 'underline' : 'none';
+        
         if (loadedFontName) t.style.fontFamily = `"${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-        // bold first line handling
+        
         const lines = (l.text || '').split('\n');
-        const first = document.createElement('div');
-        first.textContent = lines[0] || '';
-        first.style.fontWeight = l.boldFirstLine || l.bold ? '700' : (l.bold ? '700' : '400');
-        if (l.italic) first.style.fontStyle = 'italic';
-        if (l.underline) first.style.textDecoration = 'underline';
-        const rest = document.createElement('div');
-        rest.textContent = lines.slice(1).join('\n');
-        t.appendChild(first); t.appendChild(rest);
-        // double click to edit
+        
+        // Exif text with bold first line
+        if(l.name === 'EXIF' && lines.length > 1) {
+          const firstLine = document.createElement('span');
+          firstLine.textContent = lines[0] || '';
+          firstLine.style.fontWeight = '700'; // Exifの1行目は常に太字
+          
+          const restOfText = document.createElement('span');
+          restOfText.textContent = lines.slice(1).join('\n');
+          
+          t.appendChild(firstLine);
+          t.appendChild(document.createElement('br')); // 改行を追加
+          t.appendChild(restOfText);
+
+        } else {
+          t.textContent = l.text || '';
+          t.style.fontWeight = l.bold ? '700' : '400';
+        }
+        
         t.addEventListener('dblclick', (ev) => { ev.stopPropagation(); startTextEdit(l); });
         el.appendChild(t);
       }
@@ -548,10 +560,6 @@ input[type="number"]{width:72px}
     if (nyC && nyC.d < bestYDist) { outY = moving.y + (nyC.v - CY); bestYDist = nyC.d; }
     if (nyB && nyB.d < bestYDist) { outY = moving.y + (nyB.v - B); bestYDist = nyB.d; }
 
-    // grid snap step (round to gridSize)
-    outX = Math.round(outX / 1) ; // we already snapped to targets
-    outY = Math.round(outY / 1);
-
     // clamp width/height to integers
     const outW = Math.max(1, Math.round(moving.width));
     const outH = Math.max(1, Math.round(moving.height));
@@ -645,6 +653,12 @@ input[type="number"]{width:72px}
     }
   }
 
+  function selectLayer(id) {
+    selectedId = id;
+    updateToolbarVisibility();
+    renderCanvas();
+  }
+
   function toggleTool(kind) {
     const layer = layers.find(l => l.id === selectedId);
     if (!layer || layer.type !== 'text') return;
@@ -719,98 +733,75 @@ input[type="number"]{width:72px}
         const size = Math.round((l.fontSize || 18) * scale);
         ctx.textBaseline = 'top';
         ctx.fillStyle = l.color || '#000';
-        // draw first line with bold/firstLine option
-        const paras = (l.text || '').split('\n');
-        // prepare fonts
-        if (loadedFontName) {
-          ctx.font = `${l.bold ? '700' : '400'} ${size}px "${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-        } else {
-          ctx.font = `${l.bold ? '700' : '400'} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-        }
-        // draw wrapped centered
-        const maxW = l.width * scale;
+        
+        const style = `${l.italic ? 'italic' : 'normal'} ${l.bold ? '700' : '400'} ${size}px`;
+        const fontStr = loadedFontName ? `${style} "${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial` : `${style} -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+        ctx.font = fontStr;
+
         let y = l.y * scale;
         const lh = Math.round(size * (l.lineHeight || 1.2));
-        for (let i = 0; i < paras.length; i++) {
-          const txt = paras[i];
-          // if not first line and italic flag set, set font accordingly
-          if (i === 0) {
-            // first line: bold if l.boldFirstLine or l.bold
-            if (loadedFontName) ctx.font = `${(l.boldFirstLine || l.bold) ? '700' : (l.bold ? '700' : '400')} ${size}px "${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-            else ctx.font = `${(l.boldFirstLine || l.bold) ? '700' : (l.bold ? '700' : '400')} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-          } else {
-            if (loadedFontName) ctx.font = `${l.bold ? '700' : '400'} ${size}px "${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-            else ctx.font = `${l.bold ? '700' : '400'} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-          }
-          // measure and wrap
-          const words = txt.split(' ');
-          let line = '';
-          for (const w of words) {
-            const test = line ? (line + ' ' + w) : w;
-            if (ctx.measureText(test).width > maxW && line) {
-              const lw = ctx.measureText(line).width;
-              ctx.fillText(line, l.x * scale + (maxW - lw) / 2, y);
-              line = w; y += lh;
-            } else {
-              line = test;
-            }
-          }
-          if (line) {
-            const lw = ctx.measureText(line).width;
-            ctx.fillText(line, l.x * scale + (maxW - lw) / 2, y);
+        const lines = (l.text || '').split('\n');
+        
+        // Handle bold first line for EXIF text
+        if(l.name === 'EXIF' && lines.length > 1) {
+            const firstLine = lines[0];
+            const restOfText = lines.slice(1).join('\n');
+            
+            // Draw first line bold
+            const boldFontStr = loadedFontName ? `${l.italic ? 'italic' : 'normal'} 700 ${size}px "${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial` : `${l.italic ? 'italic' : 'normal'} 700 ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+            ctx.font = boldFontStr;
+            ctx.textAlign = l.align || 'center';
+            if (l.align === 'center') ctx.fillText(firstLine, (l.x * scale) + (l.width * scale / 2), y);
+            else if (l.align === 'left') ctx.fillText(firstLine, l.x * scale, y);
+            else ctx.fillText(firstLine, l.x * scale + l.width * scale, y);
+
             y += lh;
-          }
+            
+            // Draw rest of the text
+            ctx.font = fontStr; // Revert to original style
+            const restLines = restOfText.split('\n');
+            for(let i=0; i < restLines.length; i++) {
+                if (l.align === 'center') ctx.fillText(restLines[i], (l.x * scale) + (l.width * scale / 2), y);
+                else if (l.align === 'left') ctx.fillText(restLines[i], l.x * scale, y);
+                else ctx.fillText(restLines[i], l.x * scale + l.width * scale, y);
+                y += lh;
+            }
+
+        } else {
+            // Normal text rendering
+            ctx.textAlign = l.align || 'center';
+            for(let i=0; i<lines.length; i++){
+                if (l.align === 'center') ctx.fillText(lines[i], (l.x * scale) + (l.width * scale / 2), y);
+                else if (l.align === 'left') ctx.fillText(lines[i], l.x * scale, y);
+                else ctx.fillText(lines[i], l.x * scale + l.width * scale, y);
+                y += lh;
+            }
         }
+
         ctx.restore();
       }
     }
 
-    const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
-    const q = format === 'png' ? 1 : 0.95;
-    const data = cvs.toDataURL(mime, q);
-    const a = document.createElement('a'); a.href = data; a.download = `frame_export.${format}`; a.click();
+    const dataUrl = cvs.toDataURL(`image/${format}`, 0.9);
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `exported_image.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
-  /* ---------- utilities ---------- */
-  function selectLayer(id) { selectedId = id; updateToolbarVisibility(); renderCanvas(); }
-  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  // Event handler for canvas outer space click
+  document.body.addEventListener('pointerdown', (e) => {
+      if (!frameBox.contains(e.target)) {
+          selectedId = null;
+          renderCanvas();
+      }
+  });
 
-  function setPreset(key) {
-    setPresetInternal(key);
-  }
-  function setPresetInternal(key) {
-    const p = PRESETS.find(x => x.key === key);
-    if (!p) return;
-    canvasW = p.w; canvasH = p.h;
-    updateScale();
-    layers = layers.map(l => computeSnapRect(l));
-    renderCanvas();
-  }
-
-  // updateScale wrapper for inner functions
-  function updateScale() { updateScaleInternal(); }
-
-  function updateScaleInternal() {
-    const maxW = Math.round(window.innerWidth * 0.72);
-    const maxH = Math.round(window.innerHeight * 0.78);
-    displayScale = Math.min(1, maxW / canvasW, maxH / canvasH) || 1;
-    frameBox.style.width = (canvasW * displayScale) + 'px';
-    frameBox.style.height = (canvasH * displayScale) + 'px';
-    canvasInner.style.width = canvasW + 'px';
-    canvasInner.style.height = canvasH + 'px';
-    canvasInner.style.transform = `scale(${displayScale})`;
-    canvasInfo.textContent = `キャンバス — ${canvasW} × ${canvasH} (表示 ${Math.round(displayScale * 100)}%)`;
-  }
-
-  /* ---------- expose some debug helpers on window for testing ---------- */
-  window._layers = () => layers;
-  window._select = (id) => { selectedId = id; renderCanvas(); };
-
-  // initialize
+  // initial call
   init();
-
-})(); // end IIFE
-
+})();
 </script>
 </body>
 </html>
