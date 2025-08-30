@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>画像エディタ</title>
+    <title>ExifFrame風エディタ</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 </head>
@@ -13,11 +13,12 @@
             <h1>ExifFrame風エディタ</h1>
             <input type="file" id="imageUpload" accept="image/*">
             <button id="addTextButton">テキストを追加</button>
+            <button id="exportButton">高画質でエクスポート</button>
         </header>
         <main id="editorContainer">
             <div id="canvasContainer">
-                <div id="imageFrame" class="layer" style="display: none;">
-                    <img id="frameImage" src="#" alt="フレーム付き画像">
+                <div id="mainFrame" class="layer" data-name="フレーム">
+                    <img id="mainImage" src="#" alt="メイン画像">
                 </div>
                 <div id="snapGuides" style="display: none;">
                     <div class="snap-line horizontal"></div>
@@ -25,8 +26,24 @@
                 </div>
             </div>
             <aside id="sidebar">
+                <h2>アスペクト比</h2>
+                <div class="aspect-ratio-buttons">
+                    <button class="aspect-btn active" data-ratio="1.2">オリジナル</button>
+                    <button class="aspect-btn" data-ratio="1">1:1</button>
+                    <button class="aspect-btn" data-ratio="0.75">4:3</button>
+                    <button class="aspect-btn" data-ratio="0.5625">16:9</button>
+                </div>
                 <h2>レイヤー</h2>
                 <ul id="layerList"></ul>
+                <h2>詳細設定</h2>
+                <div class="controls">
+                    <label>
+                        枠の色: <input type="color" id="frameColor" value="#ffffff">
+                    </label>
+                    <label>
+                        テキストの色: <input type="color" id="textColor" value="#000000">
+                    </label>
+                </div>
             </aside>
         </main>
     </div>
