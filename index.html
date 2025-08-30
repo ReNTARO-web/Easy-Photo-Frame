@@ -9,18 +9,14 @@
 <body>
     <div id="app">
         <header>
-            <h1>画像エディタ</h1>
+            <h1>ExifFrame風エディタ</h1>
             <input type="file" id="imageUpload" accept="image/*">
             <button id="addTextButton">テキストを追加</button>
         </header>
         <main id="editorContainer">
             <div id="canvasContainer">
-                <div id="imageWrapper" class="layer" style="display: none;">
-                    <img id="uploadedImage" src="#" alt="アップロードされた画像">
-                    <div class="resize-handle top-left"></div>
-                    <div class="resize-handle top-right"></div>
-                    <div class="resize-handle bottom-left"></div>
-                    <div class="resize-handle bottom-right"></div>
+                <div id="imageFrame" class="layer" style="display: none;">
+                    <img id="frameImage" src="#" alt="フレーム付き画像">
                 </div>
                 <div id="snapGuides" style="display: none;">
                     <div class="snap-line horizontal"></div>
