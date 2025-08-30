@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>写真フレームエディタ</title>
+  <title>Exifフレームエディタ</title>
   <!-- React 17 & Babel -->
   <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
@@ -43,8 +43,13 @@
       const [cw,ch] = aspectRatios[ratio];
       const snapThreshold = 10; // スナップ感度
 
-      // スナップ処理
-      const snap = (val, targets) => {
+      // スナップ処理（中心・端）
+      const snapValue = (val, size, frameSize) => {
+        const targets = [
+          0,                            // 左 or 上端
+          frameSize/2 - size/2,         // 中央
+          frameSize - size              // 右 or 下端
+        ];
         for(let t of targets){
           if(Math.abs(val - t) < snapThreshold) return t;
         }
@@ -66,7 +71,7 @@
             const exposure = EXIF.getTag(this,"ExposureTime") || "";
             const focal = EXIF.getTag(this,"FocalLength") || "";
 
-            const textContent = `**${make} ${model}**\nISO ${iso} 露出 ${exposure} レンズ ${focal}`;
+            const textContent = `${make} ${model}\nISO ${iso} 露出 ${exposure} レンズ ${focal}`;
 
             // 画像とテキストをフレーム中央に配置
             setObjects(prev=>[
@@ -88,14 +93,9 @@
         const move = (ev)=>{
           const dx = ev.clientX - startX;
           const dy = ev.clientY - startY;
-          const newX = initX+dx;
-          const newY = initY+dy;
-
-          // スナップ対象（中心＆端）
-          const snapX = snap(newX, [0, cw/2 - obj.w/2, cw-obj.w]);
-          const snapY = snap(newY, [0, ch/2 - obj.h/2, ch-obj.h]);
-
-          setObjects(prev=>prev.map(o=>o.id===id?{...o,x:snapX,y:snapY}:o));
+          const newX = snapValue(initX+dx, obj.w, cw);
+          const newY = snapValue(initY+dy, obj.h, ch);
+          setObjects(prev=>prev.map(o=>o.id===id?{...o,x:newX,y:newY}:o));
         };
         const up = ()=>{
           window.removeEventListener("mousemove",move);
@@ -116,7 +116,9 @@
         const move = (ev)=>{
           const dw = ev.clientX - startX;
           const dh = ev.clientY - startY;
-          setObjects(prev=>prev.map(o=>o.id===id?{...o,w:Math.max(30,initW+dw),h:Math.max(20,initH+dh)}:o));
+          const newW = Math.max(30,initW+dw);
+          const newH = Math.max(20,initH+dh);
+          setObjects(prev=>prev.map(o=>o.id===id?{...o,w:newW,h:newH}:o));
         };
         const up = ()=>{
           window.removeEventListener("mousemove",move);
@@ -126,18 +128,23 @@
         window.addEventListener("mouseup",up);
       };
 
-      // 保存
+      // 保存（ハンドル非表示）
       const saveAsImage = async ()=>{
+        const handles = document.querySelectorAll(".resize-handle");
+        handles.forEach(h=>h.style.display="none");
+
         const canvas = await html2canvas(containerRef.current,{scale:2});
         const link = document.createElement("a");
         link.download="workspace.png";
         link.href = canvas.toDataURL("image/png");
         link.click();
+
+        handles.forEach(h=>h.style.display="block");
       };
 
       return (
         <div className="flex flex-col items-center p-4 space-y-2">
-          <h1 className="text-xl font-bold">📸 写真フレームエディタ</h1>
+          <h1 className="text-xl font-bold">📸 Exifフレームエディタ</h1>
           <div className="flex gap-2">
             {Object.keys(aspectRatios).map(r=>(
               <button key={r} onClick={()=>setRatio(r)} className={`px-2 py-1 ${r===ratio?"bg-blue-500 text-white":"bg-gray-200"}`}>
@@ -156,7 +163,7 @@
                   onChange={(e)=>setObjects(prev=>prev.map(x=>x.id===o.id?{...x,content:e.target.value}:x))}
                   onBlur={()=>setEditingId(null)}
                   onKeyDown={(e)=>{if(e.key==="Enter"){e.preventDefault();setEditingId(null);}}}
-                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray",textAlign:"center",fontWeight:"normal"}}
+                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray",textAlign:"center"}}
                 />
               ) : (
                 <div key={o.id}
@@ -167,7 +174,7 @@
                 >
                   {o.type==="image" ? <img src={o.url} className="w-full h-full object-contain"/> :
                     <div className="editable-text w-full h-full flex flex-col justify-center">
-                      <span className="font-bold">{o.content.split("\n")[0].replace("**","").replace("**","")}</span>
+                      <span className="font-bold">{o.content.split("\n")[0]}</span>
                       <span>{o.content.split("\n").slice(1).join("\n")}</span>
                     </div>
                   }
