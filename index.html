@@ -15,9 +15,12 @@
   <!-- exif-js -->
   <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; }
+    @font-face {
+      font-family: 'CorporateLogo';
+      src: url('./Corporate-Logo-Bold-ver3.otf') format('opentype');
+    }
+    body { font-family: 'CorporateLogo', -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; }
     .draggable { position:absolute; cursor:move; }
-    .resize-handle { width:10px;height:10px;background:#2563eb;position:absolute;right:-5px;bottom:-5px;cursor:se-resize; }
     .editable-text { white-space: pre-wrap; text-align: center; }
   </style>
 </head>
@@ -41,14 +44,13 @@
       const [editingId,setEditingId] = useState(null);
       const containerRef = useRef(null);
       const [cw,ch] = aspectRatios[ratio];
-      const snapThreshold = 10; // スナップ感度
+      const snapThreshold = 8;
 
-      // スナップ処理（中心・端）
-      const snapValue = (val, size, frameSize) => {
+      // スナップ
+      const snapValue = (val, size, frameSize, others=[]) => {
         const targets = [
-          0,                            // 左 or 上端
-          frameSize/2 - size/2,         // 中央
-          frameSize - size              // 右 or 下端
+          0, frameSize/2 - size/2, frameSize - size,
+          ...others
         ];
         for(let t of targets){
           if(Math.abs(val - t) < snapThreshold) return t;
@@ -56,14 +58,13 @@
         return val;
       };
 
-      // ファイルアップロード
+      // 画像アップロード
       const handleUpload = (e)=>{
         const files = Array.from(e.target.files);
         files.forEach((file,idx)=>{
           if(!file.type.startsWith("image/")) return;
           const url = URL.createObjectURL(file);
 
-          // EXIF読み込み
           EXIF.getData(file, function(){
             const make = EXIF.getTag(this,"Make") || "";
             const model = EXIF.getTag(this,"Model") || "";
@@ -73,11 +74,10 @@
 
             const textContent = `${make} ${model}\nISO ${iso} 露出 ${exposure} レンズ ${focal}`;
 
-            // 画像とテキストをフレーム中央に配置
             setObjects(prev=>[
               ...prev,
               {id:Date.now()+idx, type:"image", url, x:cw/2-150, y:ch/2-100, w:300, h:200},
-              {id:Date.now()+idx+1000, type:"text", content:textContent, x:cw/2-100, y:ch/2+120, w:200, h:60}
+              {id:Date.now()+idx+1000, type:"text", content:textContent, x:cw/2-100, y:ch/2+120, w:200, h:60, bold:true, color:"#000", size:16}
             ]);
           });
         });
@@ -93,8 +93,9 @@
         const move = (ev)=>{
           const dx = ev.clientX - startX;
           const dy = ev.clientY - startY;
-          const newX = snapValue(initX+dx, obj.w, cw);
-          const newY = snapValue(initY+dy, obj.h, ch);
+          const otherObjs = objects.filter(o=>o.id!==id).map(o=>[o.x,o.x+o.w/2,o.x+o.w]);
+          const newX = snapValue(initX+dx, obj.w, cw, otherObjs.flat());
+          const newY = snapValue(initY+dy, obj.h, ch, []);
           setObjects(prev=>prev.map(o=>o.id===id?{...o,x:newX,y:newY}:o));
         };
         const up = ()=>{
@@ -105,41 +106,13 @@
         window.addEventListener("mouseup",up);
       };
 
-      // サイズ変更
-      const onResize = (id,e)=>{
-        e.stopPropagation();
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const obj = objects.find(o=>o.id===id);
-        const initW = obj.w;
-        const initH = obj.h;
-        const move = (ev)=>{
-          const dw = ev.clientX - startX;
-          const dh = ev.clientY - startY;
-          const newW = Math.max(30,initW+dw);
-          const newH = Math.max(20,initH+dh);
-          setObjects(prev=>prev.map(o=>o.id===id?{...o,w:newW,h:newH}:o));
-        };
-        const up = ()=>{
-          window.removeEventListener("mousemove",move);
-          window.removeEventListener("mouseup",up);
-        };
-        window.addEventListener("mousemove",move);
-        window.addEventListener("mouseup",up);
-      };
-
-      // 保存（ハンドル非表示）
+      // 保存
       const saveAsImage = async ()=>{
-        const handles = document.querySelectorAll(".resize-handle");
-        handles.forEach(h=>h.style.display="none");
-
         const canvas = await html2canvas(containerRef.current,{scale:2});
         const link = document.createElement("a");
         link.download="workspace.png";
         link.href = canvas.toDataURL("image/png");
         link.click();
-
-        handles.forEach(h=>h.style.display="block");
       };
 
       return (
@@ -163,22 +136,21 @@
                   onChange={(e)=>setObjects(prev=>prev.map(x=>x.id===o.id?{...x,content:e.target.value}:x))}
                   onBlur={()=>setEditingId(null)}
                   onKeyDown={(e)=>{if(e.key==="Enter"){e.preventDefault();setEditingId(null);}}}
-                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray",textAlign:"center"}}
+                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray",textAlign:"center",fontFamily:"CorporateLogo",fontSize:o.size,color:o.color,fontWeight:o.bold?"bold":"normal"}}
                 />
               ) : (
                 <div key={o.id}
-                  className="draggable border border-gray-300 flex items-center justify-center"
-                  style={{left:o.x,top:o.y,width:o.w,height:o.h,textAlign:"center"}}
+                  className="draggable flex items-center justify-center"
+                  style={{left:o.x,top:o.y,width:o.w,height:o.h,textAlign:"center",position:"absolute"}}
                   onMouseDown={(e)=>{ if(e.detail===1) onDrag(o.id,e); }}
                   onDoubleClick={()=>setEditingId(o.id)}
                 >
                   {o.type==="image" ? <img src={o.url} className="w-full h-full object-contain"/> :
-                    <div className="editable-text w-full h-full flex flex-col justify-center">
-                      <span className="font-bold">{o.content.split("\n")[0]}</span>
-                      <span>{o.content.split("\n").slice(1).join("\n")}</span>
+                    <div className="editable-text w-full h-full flex flex-col justify-center"
+                      style={{fontFamily:"CorporateLogo",fontSize:o.size,color:o.color,fontWeight:o.bold?"bold":"normal"}}>
+                      {o.content}
                     </div>
                   }
-                  <div className="resize-handle" onMouseDown={(e)=>onResize(o.id,e)}></div>
                 </div>
               )
             ))}
