@@ -1,159 +1,760 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>写真フレームエディタ</title>
-  <!-- React 17 & Babel -->
-  <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Tailwind -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- html2canvas -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; }
-    .draggable { position:absolute; cursor:move; }
-    .resize-handle { width:10px;height:10px;background:#2563eb;position:absolute;right:-5px;bottom:-5px;cursor:se-resize; }
-    .editable-text { white-space: pre-wrap; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Frame Editor — Vanilla (EXIF, Snap, Align)</title>
+
+<!-- exif-js for local EXIF read -->
+<script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+
+<style>
+:root{
+  --bg:#f6f8fb; --panel:#fff; --muted:#94a3b8; --accent:#2563eb; --text:#0f172a;
+}
+html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Segoe UI",Roboto,Arial;background:var(--bg);color:var(--text)}
+.container{max-width:1400px;margin:18px auto;padding:16px;display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
+.card{background:var(--panel);border:1px solid #e6eef8;border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(8,20,40,0.04)}
+.h{font-weight:700;margin-bottom:8px}
+.btn{border:1px solid #e6eef8;background:#fff;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px}
+.btn.primary{background:var(--accent);color:white;border-color:var(--accent)}
+.small{font-size:13px;color:var(--muted)}
+.controls{display:flex;flex-wrap:wrap;gap:8px}
+.layer-list{max-height:42vh;overflow:auto}
+.layer-row{display:flex;gap:8px;align-items:center;padding:8px;border-radius:8px}
+.layer-row.selected{background:#eef6ff}
+.canvas-area{display:flex;flex-direction:column;gap:8px;align-items:center}
+.frame-box{position:relative;border-radius:10px;overflow:hidden;background:#fff;box-shadow:0 8px 28px rgba(8,20,40,0.06)}
+.grid-bg{background-image:linear-gradient(to right,#eef6fb 1px,transparent 1px),linear-gradient(to bottom,#eef6fb 1px,transparent 1px);background-size:20px 20px}
+.selection-ring{outline:3px solid rgba(37,99,235,0.12);box-shadow:0 0 0 6px rgba(37,99,235,0.04) inset}
+.handle{position:absolute;width:14px;height:14px;background:var(--accent);border-radius:3px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.12)}
+.handle.nw{top:-8px;left:-8px;cursor:nwse-resize}
+.handle.ne{top:-8px;right:-8px;cursor:nesw-resize}
+.handle.sw{bottom:-8px;left:-8px;cursor:nesw-resize}
+.handle.se{bottom:-8px;right:-8px;cursor:nwse-resize}
+.tooltip{position:fixed;background:var(--text);color:#fff;padding:6px 8px;border-radius:6px;font-size:13px;pointer-events:none;z-index:9999}
+.guide-v{position:absolute;width:1px;background:#60a5fa;opacity:0.9;top:0;bottom:0;transform:translateX(-0.5px);z-index:999}
+.guide-h{position:absolute;height:1px;background:#60a5fa;opacity:0.9;left:0;right:0;transform:translateY(-0.5px);z-index:999}
+textarea.editing{resize:none;border:1px dashed #cbd5e1;background:transparent;padding:6px;border-radius:6px;font-family:inherit}
+.preset{padding:6px 8px;border-radius:8px;border:1px solid #e6eef8;background:#fff;cursor:pointer;font-size:13px}
+.preset.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+@media (max-width:1024px){ .container{grid-template-columns:1fr;padding:12px} .canvas-area{align-items:stretch} }
+</style>
 </head>
-<body class="bg-gray-100">
-  <div id="root"></div>
+<body>
+<div class="container">
 
-  <script type="text/babel">
+  <!-- LEFT: Controls & Layers -->
+  <div class="card" id="leftPanel">
+    <div class="h">レイヤー & ツール</div>
 
-    const { useState, useRef, useEffect } = React;
+    <div style="margin-bottom:8px">
+      <label class="btn" title="画像を追加">
+        画像追加
+        <input id="fileInput" type="file" accept="image/*" multiple style="display:none">
+      </label>
+      <button id="addTextBtn" class="btn" style="margin-left:8px">テキスト追加</button>
+    </div>
 
-    const aspectRatios = {
-      "Instagram (1:1)": [600, 600],
-      "Twitter (16:9)": [960, 540],
-      "YouTube (1280×720)": [1280, 720],
-      "Facebook (1200×630)": [1200, 630],
+    <div style="margin-bottom:10px">
+      <div class="small" style="margin-bottom:6px">プリセット（ワンクリック）</div>
+      <div id="presetRow" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <label style="display:block;margin-bottom:6px"><input id="gridToggle" type="checkbox" checked> グリッド</label>
+      <label style="display:block;margin-bottom:6px"><input id="snapToggle" type="checkbox" checked> スナップ</label>
+    </div>
+
+    <div class="h small">レイヤー</div>
+    <div id="layerList" class="layer-list" style="margin-bottom:8px"></div>
+
+    <div style="margin-top:8px">
+      <div class="h small">整列 / 分布</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+        <button class="btn" data-action="align-left">左揃え</button>
+        <button class="btn" data-action="align-centerx">中央X</button>
+        <button class="btn" data-action="align-right">右揃え</button>
+        <button class="btn" data-action="align-top">上揃え</button>
+        <button class="btn" data-action="align-centery">中央Y</button>
+        <button class="btn" data-action="align-bottom">下揃え</button>
+        <button class="btn" data-action="dist-x">分布X</button>
+        <button class="btn" data-action="dist-y">分布Y</button>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <div class="h small">書き出し</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+        <select id="fmt"><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select>
+        <select id="scale"><option value="1">1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="3">3x</option></select>
+        <button id="exportBtn" class="btn primary">書き出し</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Canvas -->
+  <div class="canvas-area">
+    <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
+      <div id="canvasInfo" class="small">キャンバス</div>
+      <div class="small">操作：ドラッグ / 角でリサイズ / Shiftで等比 / 矢印微調整</div>
+    </div>
+
+    <div id="frameContainer" class="frame-box" style="width:900px;height:900px;transform-origin:top left">
+      <!-- Inner canvas where layers are rendered -->
+      <div id="canvasInner" style="position:relative;left:0;top:0"></div>
+
+      <!-- guides (inserted dynamically) -->
+    </div>
+  </div>
+</div>
+
+<!-- Pure JS implementation -->
+<script>
+"use strict";
+
+/* ========== Config ========== */
+const PRESETS = [
+  {key:'instagram', label:'Instagram 1:1', w:1080, h:1080},
+  {key:'story', label:'Story 9:16', w:1080, h:1920},
+  {key:'x', label:'X/Twitter 16:9', w:1920, h:1080},
+  {key:'youtube', label:'YouTube 1280×720', w:1280, h:720},
+  {key:'facebook', label:'Facebook 1200×630', w:1200, h:630},
+  {key:'photo32', label:'Photo 3:2', w:1800, h:1200},
+  {key:'a4p', label:'A4 縦', w:2480, h:3508},
+  {key:'a4l', label:'A4 横', w:3508, h:2480}
+];
+
+const SNAP_RANGE = 8;
+const SNAP_STEP = 10;
+
+/* ========== State ========== */
+let canvasW = 1080, canvasH = 1080;
+let displayScale = 1;
+let gridOn = true, snapOn = true;
+let layers = []; // {id,type('photo'|'text'), visible, x,y,width,height, url, text, fontSize,...}
+let selectedIds = []; // multiple selection
+let dragState = null; // for pointer drag/resize
+let shiftPressed = false;
+
+/* ========== DOM refs ========== */
+const presetRow = document.getElementById('presetRow');
+const fileInput = document.getElementById('fileInput');
+const addTextBtn = document.getElementById('addTextBtn');
+const layerList = document.getElementById('layerList');
+const frameContainer = document.getElementById('frameContainer');
+const canvasInner = document.getElementById('canvasInner');
+const canvasInfo = document.getElementById('canvasInfo');
+const gridToggle = document.getElementById('gridToggle');
+const snapToggle = document.getElementById('snapToggle');
+const exportBtn = document.getElementById('exportBtn');
+const fmtSel = document.getElementById('fmt');
+const scaleSel = document.getElementById('scale');
+
+/* ========== Init UI ========== */
+function initUI(){
+  // presets
+  PRESETS.forEach(p=>{
+    const b = document.createElement('button');
+    b.className = 'preset';
+    b.textContent = p.label;
+    b.addEventListener('click', ()=> setPreset(p.key));
+    if(p.key === 'instagram') b.classList.add('active');
+    presetRow.appendChild(b);
+  });
+
+  fileInput.addEventListener('change', onFiles);
+  addTextBtn.addEventListener('click', ()=> addTextLayer('ダブルクリックで編集'));
+  gridToggle.addEventListener('change', (e)=>{ gridOn = e.target.checked; renderCanvas(); });
+  snapToggle.addEventListener('change', (e)=>{ snapOn = e.target.checked; });
+  exportBtn.addEventListener('click', ()=> {
+    exportImage(fmtSel.value, parseFloat(scaleSel.value));
+  });
+
+  // align/distribute handlers
+  document.querySelectorAll('[data-action]').forEach(btn=>{
+    btn.addEventListener('click', ()=> {
+      const a = btn.getAttribute('data-action');
+      if(a.startsWith('align')) alignAction(a.split('-')[1]);
+      else if(a.startsWith('dist')) distributeAction(a.split('-')[1]);
+    });
+  });
+
+  // keyboard for shift + arrows and delete
+  window.addEventListener('keydown', (e)=>{
+    if(e.key === 'Shift') shiftPressed = true;
+    if(document.activeElement && (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT')) return;
+    if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key) && selectedIds.length>0){
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+      moveSelectedBy(dx, dy);
+    }
+    if((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length>0){
+      deleteSelected();
+    }
+  });
+  window.addEventListener('keyup', (e)=>{ if(e.key==='Shift') shiftPressed=false; });
+
+  // resize to fit
+  window.addEventListener('resize', updateDisplayScale);
+}
+
+/* ========== Helpers ========== */
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+
+function setPreset(key){
+  const p = PRESETS.find(x=>x.key===key);
+  if(!p) return;
+  canvasW = p.w; canvasH = p.h;
+  // update active class
+  Array.from(presetRow.children).forEach(b=> b.classList.toggle('active', b.textContent === p.label));
+  updateDisplayScale();
+  renderCanvas();
+}
+
+function updateDisplayScale(){
+  const maxW = Math.round(window.innerWidth * 0.86);
+  const maxH = Math.round(window.innerHeight * 0.78);
+  const s = Math.min(1, maxW / canvasW, maxH / canvasH);
+  displayScale = s || 1;
+  frameContainer.style.width = (canvasW * displayScale) + 'px';
+  frameContainer.style.height = (canvasH * displayScale) + 'px';
+  canvasInner.style.width = canvasW + 'px';
+  canvasInner.style.height = canvasH + 'px';
+  canvasInner.style.transform = `scale(${displayScale})`;
+  canvasInfo.textContent = `キャンバス — ${canvasW} × ${canvasH} (表示倍率 ${Math.round(displayScale*100)}%)`;
+}
+
+function addLayer(l){
+  layers.push(l);
+  renderLayerList();
+  renderCanvas();
+}
+
+function addTextLayer(text){
+  const photos = layers.filter(x=> x.type==='photo');
+  const belowY = photos.length>0 ? Math.max(...photos.map(p=> p.y + p.height)) + 16 : 40;
+  const l = { id: uid(), type:'text', name:'Text', visible:true, x:40, y:belowY, width: Math.min(600, canvasW - 80), height: 60, text, fontSize:24, lineHeight:1.3, align:'left', color:'#0f172a' };
+  addLayer(l);
+  setSelected([l.id]);
+}
+
+function onFiles(e){
+  const files = Array.from(e.target.files || []);
+  files.forEach(file => {
+    if(!file.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function(){
+      const natW = img.naturalWidth, natH = img.naturalHeight;
+      const baseW = Math.min(Math.max(360, Math.round(canvasW * 0.45)), natW || Math.round(canvasW*0.6));
+      const ratio = (natW && natH) ? (natW / natH) : (16/9);
+      const baseH = Math.round(baseW / ratio);
+      const photos = layers.filter(l=> l.type === 'photo');
+      const belowY = photos.length>0 ? Math.max(...photos.map(p=> p.y + p.height)) + 16 : 40;
+      const l = { id: uid(), type:'photo', name:'Photo', visible:true, x:40, y:belowY, width: baseW, height: baseH, url };
+      addLayer(l);
+      // EXIF read (exif-js)
+      try{
+        EXIF.getData(file, function(){
+          const make = EXIF.getTag(this,'Make') || '';
+          const model = EXIF.getTag(this,'Model') || '';
+          const iso = EXIF.getTag(this,'ISOSpeedRatings') || '';
+          const exposure = EXIF.getTag(this,'ExposureTime') || '';
+          const focal = EXIF.getTag(this,'FocalLength') || '';
+          const meta = [ [make,model].filter(Boolean).join(' '), [focal? `${focal}mm`: '', exposure? `${exposure}s`:'', iso? `ISO ${iso}`:''].filter(Boolean).join(' | ') ].filter(Boolean).join('\n');
+          if(meta){
+            const tid = uid();
+            const ty = { id:tid, type:'text', name:'EXIF', visible:true, x: l.x + 8, y: l.y + l.height + 8, width: Math.min(600, canvasW - 80), height: 48, text: meta, fontSize:16, lineHeight:1.2, align:'left', color:'#111' };
+            addLayer(ty);
+          }
+        });
+      }catch(err){
+        // ignore
+      }
     };
+    img.src = url;
+  });
+  e.target.value = '';
+}
 
-    function App(){
-      const [ratio,setRatio] = useState("Instagram (1:1)");
-      const [objects,setObjects] = useState([
-        {id:1,type:"text",content:"ダブルクリックで編集",x:50,y:50,w:200,h:40}
-      ]);
-      const [editingId,setEditingId] = useState(null);
-      const [selectedIds,setSelectedIds] = useState([]);
-      const containerRef = useRef(null);
-      const [cw,ch] = aspectRatios[ratio];
+/* ========== Rendering ========== */
+function clearCanvas(){
+  // remove existing children
+  while(canvasInner.firstChild) canvasInner.removeChild(canvasInner.firstChild);
+  // remove guide lines
+  const existing = frameContainer.querySelectorAll('.guide-v, .guide-h');
+  existing.forEach(n=> n.remove());
+}
 
-      // 移動
-      const onDrag = (id,e) => {
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const obj = objects.find(o=>o.id===id);
-        const initX = obj.x;
-        const initY = obj.y;
-        const move = (ev)=>{
-          const dx = ev.clientX - startX;
-          const dy = ev.clientY - startY;
-          setObjects(prev => prev.map(o=>o.id===id?{...o,x:initX+dx,y:initY+dy}:o));
-        };
-        const up = ()=>{
-          window.removeEventListener("mousemove",move);
-          window.removeEventListener("mouseup",up);
-        };
-        window.addEventListener("mousemove",move);
-        window.addEventListener("mouseup",up);
-      };
+function renderCanvas(){
+  clearCanvas();
+  // grid
+  if(gridOn){
+    canvasInner.classList.add('grid-bg');
+  } else {
+    canvasInner.classList.remove('grid-bg');
+  }
 
-      // サイズ変更
-      const onResize = (id,e)=>{
-        e.stopPropagation();
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const obj = objects.find(o=>o.id===id);
-        const initW = obj.w;
-        const initH = obj.h;
-        const move = (ev)=>{
-          const dw = ev.clientX - startX;
-          const dh = ev.clientY - startY;
-          setObjects(prev=>prev.map(o=>o.id===id?{...o,w:Math.max(30,initW+dw),h:Math.max(20,initH+dh)}:o));
-        };
-        const up = ()=>{
-          window.removeEventListener("mousemove",move);
-          window.removeEventListener("mouseup",up);
-        };
-        window.addEventListener("mousemove",move);
-        window.addEventListener("mouseup",up);
-      };
+  // draw layers in order (back to front)
+  layers.forEach((l, idx) => {
+    if(!l.visible) return;
+    const el = document.createElement('div');
+    el.className = 'layerItem';
+    el.style.position = 'absolute';
+    el.style.left = l.x + 'px';
+    el.style.top = l.y + 'px';
+    el.style.width = l.width + 'px';
+    el.style.height = l.height + 'px';
+    el.style.zIndex = 100 + idx;
+    if(selectedIds.includes(l.id)) el.classList.add('selection-ring');
 
-      // 整列
-      const align = (mode)=>{
-        if(selectedIds.length===0) return;
-        if(mode==="centerX"){
-          setObjects(prev=>prev.map(o=>selectedIds.includes(o.id)?{...o,x:cw/2 - o.w/2}:o));
-        } else if(mode==="centerY"){
-          setObjects(prev=>prev.map(o=>selectedIds.includes(o.id)?{...o,y:ch/2 - o.h/2}:o));
-        } else if(mode==="left"){
-          setObjects(prev=>prev.map(o=>selectedIds.includes(o.id)?{...o,x:0}:o));
-        } else if(mode==="right"){
-          setObjects(prev=>prev.map(o=>selectedIds.includes(o.id)?{...o,x:cw-o.w}:o));
-        }
-      };
-
-      // 保存
-      const saveAsImage = async ()=>{
-        const canvas = await html2canvas(containerRef.current,{scale:2});
-        const link = document.createElement("a");
-        link.download="workspace.png";
-        link.href = canvas.toDataURL("image/png");
-        link.click();
-      };
-
-      return (
-        <div className="flex flex-col items-center p-4 space-y-2">
-          <h1 className="text-xl font-bold">📸 写真フレームエディタ</h1>
-          <div className="flex gap-2">
-            {Object.keys(aspectRatios).map(r=>(
-              <button key={r} onClick={()=>setRatio(r)} className={`px-2 py-1 ${r===ratio?"bg-blue-500 text-white":"bg-gray-200"}`}>
-                {r}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <button onClick={()=>align("centerX")} className="px-2 py-1 bg-gray-200">中央横揃え</button>
-            <button onClick={()=>align("centerY")} className="px-2 py-1 bg-gray-200">中央縦揃え</button>
-            <button onClick={()=>align("left")} className="px-2 py-1 bg-gray-200">左揃え</button>
-            <button onClick={()=>align("right")} className="px-2 py-1 bg-gray-200">右揃え</button>
-          </div>
-          <button onClick={saveAsImage} className="px-3 py-1 bg-green-500 text-white">保存</button>
-
-          <div ref={containerRef} className="relative bg-white border shadow"
-            style={{width:cw,height:ch}}>
-            {objects.map(o=>(
-              editingId===o.id ? (
-                <textarea key={o.id} autoFocus value={o.content}
-                  onChange={(e)=>setObjects(prev=>prev.map(x=>x.id===o.id?{...x,content:e.target.value}:x))}
-                  onBlur={()=>setEditingId(null)}
-                  onKeyDown={(e)=>{if(e.key==="Enter"){e.preventDefault();setEditingId(null);}}}
-                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray"}}
-                />
-              ) : (
-                <div key={o.id}
-                  className="draggable border border-gray-300"
-                  style={{left:o.x,top:o.y,width:o.w,height:o.h}}
-                  onMouseDown={(e)=>{ if(e.detail===1) onDrag(o.id,e); }}
-                  onDoubleClick={()=>setEditingId(o.id)}
-                  onClick={()=>setSelectedIds([o.id])}
-                >
-                  <div className="editable-text w-full h-full flex items-center justify-center">{o.content}</div>
-                  <div className="resize-handle" onMouseDown={(e)=>onResize(o.id,e)}></div>
-                </div>
-              )
-            ))}
-          </div>
-        </div>
-      );
+    // content
+    if(l.type === 'photo'){
+      const img = document.createElement('img');
+      img.src = l.url;
+      img.draggable = false;
+      img.style.width = '100%';
+      img.style.height = '100%';
+      img.style.objectFit = 'cover';
+      img.style.pointerEvents = 'none';
+      el.appendChild(img);
+    } else if(l.type === 'text'){
+      const d = document.createElement('div');
+      d.style.width = '100%';
+      d.style.height = '100%';
+      d.style.padding = '6px';
+      d.style.boxSizing = 'border-box';
+      d.style.whiteSpace = 'pre-wrap';
+      d.style.overflow = 'hidden';
+      d.style.fontSize = (l.fontSize || 18) + 'px';
+      d.style.lineHeight = (l.lineHeight || 1.3);
+      d.style.textAlign = l.align || 'left';
+      d.style.color = l.color || '#111';
+      d.textContent = l.text || l.content || '';
+      d.addEventListener('dblclick', (ev)=>{
+        ev.stopPropagation();
+        startTextEdit(l);
+      });
+      el.appendChild(d);
     }
 
-    ReactDOM.render(<App/>, document.getElementById("root"));
-  </script>
+    // pointer down to start drag/select
+    el.addEventListener('pointerdown', (ev)=> {
+      ev.stopPropagation();
+      onLayerPointerDown(ev, l);
+    });
+
+    // resize handles only when single selected
+    if(selectedIds.length === 1 && selectedIds[0] === l.id){
+      ['nw','ne','sw','se'].forEach(corner=>{
+        const h = document.createElement('div');
+        h.className = 'handle ' + corner;
+        h.addEventListener('pointerdown', (ev)=> {
+          ev.stopPropagation();
+          startResize(ev, l, corner);
+        });
+        el.appendChild(h);
+      });
+    }
+
+    canvasInner.appendChild(el);
+  });
+
+  renderLayerList();
+}
+
+/* ========== Layer List UI ========== */
+function renderLayerList(){
+  layerList.innerHTML = '';
+  layers.forEach((l, idx)=>{
+    const row = document.createElement('div');
+    row.className = 'layer-row' + (selectedIds.includes(l.id)? ' selected':'');
+    row.style.border = '1px solid transparent';
+    row.style.marginBottom = '6px';
+    row.style.padding = '6px';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox'; chk.checked = !!l.visible;
+    chk.addEventListener('change', ()=> { l.visible = chk.checked; renderCanvas(); });
+    const label = document.createElement('div'); label.style.flex = '1'; label.style.fontSize = '13px';
+    label.textContent = `${l.name || l.type} (${l.type})`;
+    const selBtn = document.createElement('button'); selBtn.className='btn'; selBtn.textContent='選択';
+    selBtn.addEventListener('click', (e)=> { e.stopPropagation(); setSelected([l.id]); renderCanvas(); });
+    const upBtn = document.createElement('button'); upBtn.className='btn'; upBtn.textContent='↑';
+    upBtn.title='前面へ'; upBtn.addEventListener('click', (e)=>{ e.stopPropagation(); bringForward(l.id); });
+    const downBtn = document.createElement('button'); downBtn.className='btn'; downBtn.textContent='↓';
+    downBtn.title='背面へ'; downBtn.addEventListener('click',(e)=>{ e.stopPropagation(); sendBackward(l.id); });
+    const delBtn = document.createElement('button'); delBtn.className='btn'; delBtn.textContent='削除';
+    delBtn.addEventListener('click',(e)=>{ e.stopPropagation(); deleteLayer(l.id); });
+
+    row.appendChild(chk); row.appendChild(label); row.appendChild(selBtn); row.appendChild(upBtn); row.appendChild(downBtn); row.appendChild(delBtn);
+    row.addEventListener('click', ()=> { // toggle selection with ctrl/meta/shift
+      const multi = window.event && (window.event.ctrlKey || window.event.metaKey || window.event.shiftKey);
+      if(multi){
+        if(selectedIds.includes(l.id)) selectedIds = selectedIds.filter(x=> x!==l.id);
+        else selectedIds.push(l.id);
+      } else {
+        selectedIds = [l.id];
+      }
+      renderCanvas();
+    });
+    layerList.appendChild(row);
+  });
+}
+
+/* ========== Selection & Z-order ========== */
+function setSelected(ids){
+  selectedIds = Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []);
+  renderCanvas();
+}
+
+function deleteLayer(id){
+  layers = layers.filter(l=> l.id !== id);
+  selectedIds = selectedIds.filter(x=> x!== id);
+  renderCanvas();
+}
+function deleteSelected(){
+  layers = layers.filter(l=> !selectedIds.includes(l.id));
+  selectedIds = [];
+  renderCanvas();
+}
+
+function bringForward(id){
+  const i = layers.findIndex(l=> l.id === id);
+  if(i>=0 && i < layers.length -1){
+    const arr = layers.slice();
+    [arr[i], arr[i+1]] = [arr[i+1], arr[i]];
+    layers = arr;
+    renderCanvas();
+  }
+}
+function sendBackward(id){
+  const i = layers.findIndex(l=> l.id === id);
+  if(i>0){
+    const arr = layers.slice();
+    [arr[i-1], arr[i]] = [arr[i], arr[i-1]];
+    layers = arr;
+    renderCanvas();
+  }
+}
+
+/* ========== Drag / Resize ========== */
+function onLayerPointerDown(ev, layer){
+  // select logic
+  const multi = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+  if(multi){
+    if(selectedIds.includes(layer.id)) selectedIds = selectedIds.filter(x=>x!==layer.id);
+    else selectedIds.push(layer.id);
+  } else {
+    selectedIds = [layer.id];
+  }
+  renderCanvas();
+
+  // begin drag for that primary id only if pointer not on handle (handles stopPropagation earlier)
+  const startX = ev.clientX, startY = ev.clientY;
+  const origin = layers.map(l=> ({...l}));
+  dragState = { mode:'drag', startX, startY, origin, primaryId: layer.id, ids: selectedIds.slice() };
+
+  function move(e){
+    if(!dragState) return;
+    const dx = e.clientX - dragState.startX, dy = e.clientY - dragState.startY;
+    const primOrig = dragState.origin.find(x=> x.id === dragState.primaryId) || dragState.origin[0];
+    const attempted = computeSnap({...primOrig, x: primOrig.x + dx, y: primOrig.y + dy, width: primOrig.width, height: primOrig.height});
+    const deltaX = attempted.x - primOrig.x, deltaY = attempted.y - primOrig.y;
+    layers = dragState.origin.map(o => {
+      if(dragState.ids.includes(o.id)) return computeSnap({...o, x: o.x + deltaX, y: o.y + deltaY, width: o.width, height: o.height});
+      return o;
+    });
+    renderCanvas();
+  }
+  function up(){ dragState = null; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); removeGuides(); }
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  showGuidesWhileDragging(layer);
+}
+
+function startResize(ev, layer, corner){
+  ev.preventDefault(); ev.stopPropagation();
+  const startX = ev.clientX, startY = ev.clientY;
+  const origin = layers.map(l=> ({...l}));
+  const aspect = layer.width / (layer.height || 1);
+  dragState = { mode:'resize', startX, startY, origin, id: layer.id, corner, aspect };
+
+  function move(e){
+    if(!dragState) return;
+    const d = dragState;
+    const base = d.origin.find(x=> x.id === d.id);
+    if(!base) return;
+    let nx = base.x, ny = base.y, nw = base.width, nh = base.height;
+    const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+    if(d.corner === 'se'){ nw = base.width + dx; nh = base.height + dy; }
+    if(d.corner === 'ne'){ nw = base.width + dx; nh = base.height - dy; ny = base.y + dy; }
+    if(d.corner === 'sw'){ nw = base.width - dx; nh = base.height + dy; nx = base.x + dx; }
+    if(d.corner === 'nw'){ nw = base.width - dx; nh = base.height - dy; nx = base.x + dx; ny = base.y + dy; }
+    if(shiftPressed){
+      nw = Math.max(10, nw);
+      nh = Math.max(8, Math.round(nw / d.aspect));
+    }
+    const snapped = computeSnap({...base, x:nx, y:ny, width: Math.max(10, nw), height: Math.max(8, nh)});
+    layers = layers.map(l => l.id === base.id ? {...l, x: snapped.x, y: snapped.y, width: snapped.width, height: snapped.height} : l);
+    renderCanvas();
+  }
+  function up(){ dragState = null; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); removeGuides(); }
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+/* ========== Snap & Guides ========== */
+function computeSnap(moving){
+  if(!snapOn) return clamp(moving);
+  const others = layers.filter(l=> l.id !== moving.id && l.visible).map(l=> ({ id:l.id, x:l.x, y:l.y, width:l.width, height:l.height, cx: l.x + l.width/2, cy: l.y + l.height/2, r: l.x + l.width, b: l.y + l.height }));
+  const guidesX = [0, canvasW/2, canvasW];
+  const guidesY = [0, canvasH/2, canvasH];
+  others.forEach(o => { guidesX.push(o.x, o.cx, o.r); guidesY.push(o.y, o.cy, o.b); });
+
+  const edges = { L: moving.x, CX: moving.x + moving.width/2, R: moving.x + moving.width, T: moving.y, CY: moving.y + moving.height/2, B: moving.y + moving.height };
+  let out = {...moving};
+
+  const nearest = (val, list) => {
+    let best = null, diff = Infinity;
+    for(const t of list){ const d = Math.abs(val - t); if(d < diff){ diff = d; best = t; } }
+    return (diff <= SNAP_RANGE) ? best : null;
+  };
+
+  const sL = nearest(edges.L, guidesX); if(sL !== null) out.x += (sL - edges.L);
+  const sCX = nearest(out.x + out.width/2, guidesX); if(sCX !== null) out.x += (sCX - (out.x + out.width/2));
+  const sR = nearest(out.x + out.width, guidesX); if(sR !== null) out.x += (sR - (out.x + out.width));
+
+  const sT = nearest(edges.T, guidesY); if(sT !== null) out.y += (sT - edges.T);
+  const sCY = nearest(out.y + out.height/2, guidesY); if(sCY !== null) out.y += (sCY - (out.y + out.height/2));
+  const sB = nearest(out.y + out.height, guidesY); if(sB !== null) out.y += (sB - (out.y + out.height));
+
+  // grid snap
+  out.x = Math.round(out.x / SNAP_STEP) * SNAP_STEP;
+  out.y = Math.round(out.y / SNAP_STEP) * SNAP_STEP;
+  out.width = Math.max(10, Math.round(out.width / SNAP_STEP) * SNAP_STEP);
+  out.height = Math.max(8, Math.round(out.height / SNAP_STEP) * SNAP_STEP);
+
+  return clamp(out);
+}
+
+function clamp(r){
+  const w = Math.max(1, Math.round(r.width));
+  const h = Math.max(1, Math.round(r.height));
+  let x = Math.round(r.x), y = Math.round(r.y);
+  x = Math.max(0, Math.min(x, canvasW - w));
+  y = Math.max(0, Math.min(y, canvasH - h));
+  return {...r, x, y, width: w, height: h};
+}
+
+function showGuidesWhileDragging(layer){
+  // draw guide lines based on current dragState primary vs others -> simple: show canvas center lines and nearest other lines
+  removeGuides();
+  // canvas center lines
+  const gv = document.createElement('div'); gv.className='guide-v'; gv.style.left = (canvasW/2) + 'px'; frameContainer.appendChild(gv);
+  const gh = document.createElement('div'); gh.className='guide-h'; gh.style.top = (canvasH/2) + 'px'; frameContainer.appendChild(gh);
+}
+
+function removeGuides(){ const es = frameContainer.querySelectorAll('.guide-v, .guide-h'); es.forEach(n=> n.remove()); }
+
+/* ========== Align / Distribute ========== */
+function alignAction(mode){
+  if(selectedIds.length === 0) return;
+  const sel = layers.filter(l=> selectedIds.includes(l.id));
+  const left = Math.min(...sel.map(s=> s.x));
+  const top = Math.min(...sel.map(s=> s.y));
+  const right = Math.max(...sel.map(s=> s.x + s.width));
+  const bottom = Math.max(...sel.map(s=> s.y + s.height));
+  const cx = (left + right)/2;
+  const cy = (top + bottom)/2;
+  layers = layers.map(l => {
+    if(!selectedIds.includes(l.id)) return l;
+    if(mode === 'left') return computeSnap({...l, x: left});
+    if(mode === 'centerx') return computeSnap({...l, x: Math.round(cx - l.width/2)});
+    if(mode === 'right') return computeSnap({...l, x: Math.round(right - l.width)});
+    if(mode === 'top') return computeSnap({...l, y: top});
+    if(mode === 'centery') return computeSnap({...l, y: Math.round(cy - l.height/2)});
+    if(mode === 'bottom') return computeSnap({...l, y: Math.round(bottom - l.height)});
+    return l;
+  });
+  renderCanvas();
+}
+
+function distributeAction(axis){
+  if(selectedIds.length < 3) return;
+  const sel = layers.filter(l=> selectedIds.includes(l.id)).sort((a,b)=> axis==='x'? a.x - b.x : a.y - b.y);
+  const start = axis==='x' ? sel[0].x : sel[0].y;
+  const end = axis==='x' ? (sel[sel.length-1].x + sel[sel.length-1].width) : (sel[sel.length-1].y + sel[sel.length-1].height);
+  const totalSize = sel.reduce((s,l)=> s + (axis==='x'? l.width : l.height), 0);
+  const gaps = sel.length - 1;
+  const gap = Math.max(0, (end - start - totalSize) / gaps);
+  let pos = start;
+  const positions = {};
+  sel.forEach(l => { positions[l.id] = pos; pos += (axis==='x'? l.width : l.height) + gap; });
+  layers = layers.map(l => selectedIds.includes(l.id) ? (axis==='x'? computeSnap({...l, x: Math.round(positions[l.id])}) : computeSnap({...l, y: Math.round(positions[l.id])})) : l);
+  renderCanvas();
+}
+
+/* ========== Move/Delete selected ========== */
+function moveSelectedBy(dx, dy){
+  layers = layers.map(l => selectedIds.includes(l.id) ? computeSnap({...l, x: l.x + dx, y: l.y + dy}) : l);
+  renderCanvas();
+}
+
+/* ========== Text Editing ========== */
+function startTextEdit(layer){
+  // create textarea overlay positioned over that layer
+  const ta = document.createElement('textarea');
+  ta.className = 'editing';
+  ta.value = layer.text || layer.content || '';
+  ta.style.position = 'absolute';
+  ta.style.left = layer.x + 'px';
+  ta.style.top = layer.y + 'px';
+  ta.style.width = layer.width + 'px';
+  ta.style.height = layer.height + 'px';
+  ta.style.fontSize = (layer.fontSize || 18) + 'px';
+  ta.style.lineHeight = (layer.lineHeight || 1.3);
+  ta.style.textAlign = layer.align || 'left';
+  canvasInner.appendChild(ta);
+  ta.focus();
+  // prevent deletion of layer while editing: keyboard handler will skip when activeElement is textarea
+  function commit(){
+    const v = ta.value;
+    layer.text = v;
+    canvasInner.removeChild(ta);
+    renderCanvas();
+  }
+  ta.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); commit(); }
+  });
+  ta.addEventListener('blur', ()=> commit());
+}
+
+/* ========== Export (offscreen canvas) ========== */
+async function exportImage(format='png', scale=1, quality=0.98){
+  // create offscreen canvas sized by canvasW * scale
+  const W = Math.round(canvasW * scale), H = Math.round(canvasH * scale);
+  const cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,W,H);
+
+  for(const l of layers){
+    if(!l.visible) continue;
+    if(l.type === 'photo'){
+      await new Promise(res => {
+        const img = new Image();
+        img.onload = ()=> { ctx.drawImage(img, l.x*scale, l.y*scale, l.width*scale, l.height*scale); res(); };
+        img.onerror = ()=> res();
+        img.src = l.url;
+      });
+    } else if(l.type === 'text'){
+      ctx.save();
+      const size = Math.round((l.fontSize || 18) * scale);
+      ctx.fillStyle = l.color || '#000';
+      ctx.font = `${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+      ctx.textBaseline = 'top';
+      const maxW = l.width * scale;
+      const paras = (l.text || l.content || '').split('\n');
+      let y = l.y * scale;
+      const lh = Math.round(size * (l.lineHeight || 1.3));
+      for(const p of paras){
+        const words = p.split(' ');
+        let line = '';
+        for(const w of words){
+          const test = line ? (line + ' ' + w) : w;
+          if(ctx.measureText(test).width > maxW && line){
+            ctx.fillText(line, l.x*scale, y);
+            line = w;
+            y += lh;
+          } else {
+            line = test;
+          }
+        }
+        ctx.fillText(line, l.x*scale, y);
+        y += lh;
+      }
+      ctx.restore();
+    }
+  }
+
+  const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
+  const q = format === 'png' ? 1 : quality;
+  const data = cvs.toDataURL(mime, q);
+  const a = document.createElement('a'); a.href = data; a.download = `frame_export.${format}`; a.click();
+}
+
+/* ========== Utilities ========== */
+function clampNum(n, min, max){ return Math.max(min, Math.min(max, n)); }
+
+/* ========== Start ========== */
+initUI();
+setPreset('instagram'); // default
+
+// expose align/distribute bindings (data-action buttons use these names)
+function alignActionWrapper(name){ alignAction(name); }
+function distributeActionWrapper(name){ distributeAction(name); }
+
+// utility wrappers (for data-action parsing)
+function alignAction(name){ alignAction(name); } // placeholder to avoid missing fn earlier
+
+// Fix the earlier naming conflict: map data-action strings to functions
+function alignAction(token){
+  if(!token) return;
+  if(token === 'left') alignActionImpl('left');
+  else if(token === 'centerx') alignActionImpl('centerx');
+  else if(token === 'right') alignActionImpl('right');
+  else if(token === 'top') alignActionImpl('top');
+  else if(token === 'centery') alignActionImpl('centery');
+  else if(token === 'bottom') alignActionImpl('bottom');
+}
+function distributeAction(token){
+  if(!token) return;
+  if(token === 'x') distributeActionImpl('x'); else distributeActionImpl('y');
+}
+
+function alignActionImpl(mode){ // actually call alignAction earlier defined
+  if(selectedIds.length === 0) return;
+  const sel = layers.filter(l=> selectedIds.includes(l.id));
+  const left = Math.min(...sel.map(s=> s.x));
+  const top = Math.min(...sel.map(s=> s.y));
+  const right = Math.max(...sel.map(s=> s.x + s.width));
+  const bottom = Math.max(...sel.map(s=> s.y + s.height));
+  const cx = (left + right)/2;
+  const cy = (top + bottom)/2;
+  layers = layers.map(l => {
+    if(!selectedIds.includes(l.id)) return l;
+    if(mode === 'left') return computeSnap({...l, x: left});
+    if(mode === 'centerx') return computeSnap({...l, x: Math.round(cx - l.width/2)});
+    if(mode === 'right') return computeSnap({...l, x: Math.round(right - l.width)});
+    if(mode === 'top') return computeSnap({...l, y: top});
+    if(mode === 'centery') return computeSnap({...l, y: Math.round(cy - l.height/2)});
+    if(mode === 'bottom') return computeSnap({...l, y: Math.round(bottom - l.height)});
+    return l;
+  });
+  renderCanvas();
+}
+
+function distributeActionImpl(axis){
+  if(selectedIds.length < 3) return;
+  const sel = layers.filter(l=> selectedIds.includes(l.id)).sort((a,b)=> axis==='x'? a.x - b.x : a.y - b.y);
+  const start = axis==='x' ? sel[0].x : sel[0].y;
+  const end = axis==='x' ? (sel[sel.length-1].x + sel[sel.length-1].width) : (sel[sel.length-1].y + sel[sel.length-1].height);
+  const totalSize = sel.reduce((s,l)=> s + (axis==='x'? l.width : l.height), 0);
+  const gaps = sel.length - 1;
+  const gap = Math.max(0, (end - start - totalSize) / gaps);
+  let pos = start; const positions = {};
+  sel.forEach(l => { positions[l.id] = pos; pos += (axis==='x'? l.width : l.height) + gap; });
+  layers = layers.map(l => selectedIds.includes(l.id) ? (axis==='x'? computeSnap({...l, x: Math.round(positions[l.id])}) : computeSnap({...l, y: Math.round(positions[l.id])})) : l);
+  renderCanvas();
+}
+
+/* Provide some exported functions for console debugging (optional) */
+window._fw_layers = () => layers;
+window._fw_selected = () => selectedIds;
+window._fw_render = () => renderCanvas();
+
+</script>
 </body>
 </html>
