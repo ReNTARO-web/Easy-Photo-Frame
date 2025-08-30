@@ -1,536 +1,159 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>フレームエディタ（スナップ/整列対応）</title>
-
-<!-- React 17 (UMD) -->
-<script src="https://unpkg.com/react@17/umd/react.development.js"></script>
-<script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-<!-- exif-js for metadata -->
-<script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
-
-<!-- html2canvas (optional preview/export fallback) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-
-<style>
-  :root{--bg:#f6f8fb;--panel:#fff;--line:#e6eef8;--accent:#2563eb;--text:#0f172a}
-  html,body,#root{height:100%}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1400px;margin:18px auto;padding:16px;display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(8,20,40,0.04)}
-  .h{font-weight:700;margin-bottom:8px}
-  .btn{border:1px solid var(--line);background:#fff;padding:8px 10px;border-radius:8px;cursor:pointer}
-  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .small{font-size:13px}
-  .layer-list{max-height:42vh;overflow:auto}
-  .layer-row{display:flex;gap:8px;align-items:center;padding:8px;border-radius:8px}
-  .layer-row.selected{background:#eef6ff}
-  .canvas-area{display:flex;flex-direction:column;gap:8px;align-items:center}
-  .frame-box{position:relative;border-radius:10px;overflow:hidden;background:#fff;box-shadow:0 8px 28px rgba(8,20,40,0.06)}
-  .grid-bg{background-image:linear-gradient(to right,#eef6fb 1px,transparent 1px),linear-gradient(to bottom,#eef6fb 1px,transparent 1px);background-size:20px 20px}
-  .handle{position:absolute;width:14px;height:14px;background:var(--accent);border-radius:3px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.12)}
-  .handle.nw{top:-8px;left:-8px;cursor:nwse-resize}
-  .handle.ne{top:-8px;right:-8px;cursor:nesw-resize}
-  .handle.sw{bottom:-8px;left:-8px;cursor:nesw-resize}
-  .handle.se{bottom:-8px;right:-8px;cursor:nwse-resize}
-  .selection-ring{outline:3px solid rgba(37,99,235,0.12);box-shadow:0 0 0 6px rgba(37,99,235,0.04) inset}
-  .tooltip{position:fixed;background:var(--text);color:#fff;padding:6px 8px;border-radius:6px;font-size:13px;pointer-events:none;z-index:9999}
-  .guide-v{position:absolute;width:1px;background:#60a5fa;opacity:0.95;top:0;bottom:0;transform:translateX(-0.5px)}
-  .guide-h{position:absolute;height:1px;background:#60a5fa;opacity:0.95;left:0;right:0;transform:translateY(-0.5px)}
-  textarea.editing{resize:none;border:1px dashed #cbd5e1;background:transparent;padding:6px;border-radius:6px;font-family:inherit}
-  @media (max-width:1024px){ .wrap{grid-template-columns:1fr;padding:12px} .canvas-area{align-items:stretch} }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>写真フレームエディタ</title>
+  <!-- React 17 & Babel -->
+  <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- html2canvas -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; }
+    .draggable { position:absolute; cursor:move; }
+    .resize-handle { width:10px;height:10px;background:#2563eb;position:absolute;right:-5px;bottom:-5px;cursor:se-resize; }
+    .editable-text { white-space: pre-wrap; }
+  </style>
 </head>
-<body>
-<div id="root"></div>
+<body class="bg-gray-100">
+  <div id="root"></div>
 
-<!-- App -->
-<script type="text/babel">
-const { useState, useEffect, useRef } = React;
+  <script type="text/babel">
 
-/* Presets */
-const PRESETS = [
-  {key:'instagram', label:'Instagram 1:1', w:1080, h:1080},
-  {key:'story', label:'Story 9:16', w:1080, h:1920},
-  {key:'reel', label:'Reel 4:5', w:1080, h:1350},
-  {key:'x', label:'Twitter/X 16:9', w:1920, h:1080},
-  {key:'youtube', label:'YouTube Thumb 1280x720', w:1280, h:720},
-  {key:'facebook', label:'Facebook 1200x630', w:1200, h:630},
-  {key:'photo32', label:'Photo 3:2', w:1800, h:1200},
-  {key:'four3', label:'4:3', w:1600, h:1200},
-  {key:'a4p', label:'A4 縦', w:2480, h:3508},
-  {key:'a4l', label:'A4 横', w:3508, h:2480},
-];
+    const { useState, useRef, useEffect } = React;
 
-const uid = ()=> Date.now().toString(36) + Math.random().toString(36).slice(2,8);
-
-/* small tooltip hook */
-function useTooltip(){
-  const [tip,setTip] = useState(null);
-  const show = (text,e)=> { if(!e) return setTip({text,x:20,y:20}); setTip({text,x:e.clientX+12,y:e.clientY+12}); };
-  const move = (e)=> tip && setTip(t=>({...t,x:e.clientX+12,y:e.clientY+12}));
-  const hide = ()=> setTip(null);
-  return {tip, show, move, hide};
-}
-
-function App(){
-  // canvas logical size
-  const [preset, setPreset] = useState('instagram');
-  const [canvasSize, setCanvasSize] = useState({w:1080,h:1080});
-  const [gridOn, setGridOn] = useState(true);
-  const [snapOn, setSnapOn] = useState(true);
-
-  // layers: ordered back->front
-  const [layers, setLayers] = useState([]);
-  const [selectedIds, setSelectedIds] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const [editingValue, setEditingValue] = useState('');
-  const [displayScale, setDisplayScale] = useState(1);
-
-  const containerRef = useRef(null);
-  const fileRef = useRef(null);
-  const dragRef = useRef(null);
-  const shiftRef = useRef(false);
-  const tooltip = useTooltip();
-
-  const SNAP_STEP = 10;
-  const SNAP_RANGE = 8;
-
-  // keep preset -> canvas size in sync
-  useEffect(()=>{
-    const p = PRESETS.find(p=>p.key===preset);
-    if(p) setCanvasSize({w:p.w, h:p.h});
-  },[preset]);
-
-  // compute display scale so canvas fits viewport (display only)
-  useEffect(()=>{
-    const update = ()=> {
-      const maxW = Math.round(window.innerWidth * 0.86);
-      const maxH = Math.round(window.innerHeight * 0.78);
-      const s = Math.min(1, maxW / canvasSize.w, maxH / canvasSize.h);
-      setDisplayScale(s);
+    const aspectRatios = {
+      "Instagram (1:1)": [600, 600],
+      "Twitter (16:9)": [960, 540],
+      "YouTube (1280×720)": [1280, 720],
+      "Facebook (1200×630)": [1200, 630],
     };
-    update();
-    window.addEventListener('resize', update);
-    return ()=> window.removeEventListener('resize', update);
-  },[canvasSize]);
 
-  // initial helper
-  useEffect(()=>{ if(layers.length===0) addText('ダブルクリックで編集\nEnterで確定、Shift+Enterで改行'); },[]);
+    function App(){
+      const [ratio,setRatio] = useState("Instagram (1:1)");
+      const [objects,setObjects] = useState([
+        {id:1,type:"text",content:"ダブルクリックで編集",x:50,y:50,w:200,h:40}
+      ]);
+      const [editingId,setEditingId] = useState(null);
+      const [selectedIds,setSelectedIds] = useState([]);
+      const containerRef = useRef(null);
+      const [cw,ch] = aspectRatios[ratio];
 
-  // helpers
-  const rectOf = (l)=>({id:l.id,x:l.x,y:l.y,w:l.width,h:l.height,cx:l.x+l.width/2,cy:l.y+l.height/2,r:l.x+l.width,b:l.y+l.height});
-  const clamp = (r) => {
-    const w = Math.max(1,Math.round(r.width)); const h = Math.max(1,Math.round(r.height));
-    let x = Math.round(r.x), y = Math.round(r.y);
-    x = Math.max(0, Math.min(x, canvasSize.w - w));
-    y = Math.max(0, Math.min(y, canvasSize.h - h));
-    return {...r, x, y, width:w, height:h};
-  };
+      // 移動
+      const onDrag = (id,e) => {
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const obj = objects.find(o=>o.id===id);
+        const initX = obj.x;
+        const initY = obj.y;
+        const move = (ev)=>{
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          setObjects(prev => prev.map(o=>o.id===id?{...o,x:initX+dx,y:initY+dy}:o));
+        };
+        const up = ()=>{
+          window.removeEventListener("mousemove",move);
+          window.removeEventListener("mouseup",up);
+        };
+        window.addEventListener("mousemove",move);
+        window.addEventListener("mouseup",up);
+      };
 
-  // snap to canvas and other layers
-  const computeSnap = (moving)=>{
-    if(!snapOn) return clamp(moving);
-    const others = layers.filter(l=> l.id !== moving.id && l.visible).map(rectOf);
-    const guidesX = [0, canvasSize.w/2, canvasSize.w];
-    const guidesY = [0, canvasSize.h/2, canvasSize.h];
-    others.forEach(o=>{ guidesX.push(o.x, o.cx, o.r); guidesY.push(o.y, o.cy, o.b); });
-    const edges = {L:moving.x, CX:moving.x + moving.width/2, R:moving.x + moving.width, T:moving.y, CY:moving.y + moving.height/2, B:moving.y + moving.height};
-    let out = {...moving};
-    const nearest = (val, list)=>{ let best=null, diff=Infinity; for(const t of list){ const d=Math.abs(val-t); if(d<diff){diff=d; best=t;} } return diff<=SNAP_RANGE? best: null; };
-    const sL = nearest(edges.L, guidesX); if(sL!==null) out.x += (sL - edges.L);
-    const sCX = nearest(out.x + out.width/2, guidesX); if(sCX!==null) out.x += (sCX - (out.x + out.width/2));
-    const sR = nearest(out.x + out.width, guidesX); if(sR!==null) out.x += (sR - (out.x + out.width));
-    const sT = nearest(edges.T, guidesY); if(sT!==null) out.y += (sT - edges.T);
-    const sCY = nearest(out.y + out.height/2, guidesY); if(sCY!==null) out.y += (sCY - (out.y + out.height/2));
-    const sB = nearest(out.y + out.height, guidesY); if(sB!==null) out.y += (sB - (out.y + out.height));
-    out.x = Math.round(out.x / SNAP_STEP) * SNAP_STEP;
-    out.y = Math.round(out.y / SNAP_STEP) * SNAP_STEP;
-    out.width = Math.max(10, Math.round(out.width / SNAP_STEP) * SNAP_STEP);
-    out.height = Math.max(8, Math.round(out.height / SNAP_STEP) * SNAP_STEP);
-    return clamp(out);
-  };
+      // サイズ変更
+      const onResize = (id,e)=>{
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const obj = objects.find(o=>o.id===id);
+        const initW = obj.w;
+        const initH = obj.h;
+        const move = (ev)=>{
+          const dw = ev.clientX - startX;
+          const dh = ev.clientY - startY;
+          setObjects(prev=>prev.map(o=>o.id===id?{...o,w:Math.max(30,initW+dw),h:Math.max(20,initH+dh)}:o));
+        };
+        const up = ()=>{
+          window.removeEventListener("mousemove",move);
+          window.removeEventListener("mouseup",up);
+        };
+        window.addEventListener("mousemove",move);
+        window.addEventListener("mouseup",up);
+      };
 
-  // add photo & exif text
-  const addPhoto = (file, idx) => {
-    const url = URL.createObjectURL(file);
-    const id = uid();
-    // attempt to get natural size via Image
-    const img = new Image();
-    img.onload = ()=>{
-      const natW = img.naturalWidth, natH = img.naturalHeight;
-      const baseW = Math.min(Math.max(360, Math.round(canvasSize.w * 0.45)), natW || Math.round(canvasSize.w*0.6));
-      const ratio = natW && natH ? (natW/natH) : (16/9);
-      const baseH = Math.round(baseW / ratio);
-      const photos = layers.filter(l=> l.type==='photo');
-      const belowY = photos.length>0 ? Math.max(...photos.map(p=> p.y + p.height)) + 16 : 40;
-      const layer = { id, type:'photo', name:`Photo ${photos.length+1}`, visible:true, x:40, y:belowY, width: baseW, height: baseH, url };
-      setLayers(prev => [...prev, layer]);
-      setSelectedIds([id]);
-      // exif read (exif-js)
-      try{
-        EXIF.getData(file, function(){
-          const make = EXIF.getTag(this,'Make') || '';
-          const model = EXIF.getTag(this,'Model') || '';
-          const iso = EXIF.getTag(this,'ISOSpeedRatings') || '';
-          const exposure = EXIF.getTag(this,'ExposureTime') || '';
-          const focal = EXIF.getTag(this,'FocalLength') || '';
-          const meta = [ [make,model].filter(Boolean).join(' '), [focal? `${focal}mm`: '', exposure? `${exposure}s`:'', iso? `ISO ${iso}`:''].filter(Boolean).join(' | ') ].filter(Boolean).join('\n');
-          if(meta){
-            const tid = uid();
-            const ty = { id:tid, type:'text', name:'EXIF', visible:true, x: 60, y: belowY + baseH + 8, width: Math.min(600, canvasSize.w - 80), height: 48, text: meta, fontSize:16, lineHeight:1.2, align:'left', color:'#111' };
-            setLayers(prev => [...prev, ty]);
-          }
-        });
-      }catch(e){ /* ignore exif failure */ }
-    };
-    img.src = url;
-  };
-
-  // add simple text layer
-  const addText = (text='ダブルクリックで編集')=>{
-    const id = uid();
-    const photos = layers.filter(l=> l.type==='photo');
-    const belowY = photos.length>0 ? Math.max(...photos.map(p=> p.y + p.height)) + 16 : 40;
-    const l = { id, type:'text', name:`Text ${layers.filter(x=>x.type==='text').length+1}`, visible:true, x:40, y:belowY, width: Math.min(600, canvasSize.w - 80), height:60, text, fontSize:22, lineHeight:1.3, align:'left', color:'#0f172a' };
-    setLayers(prev => [...prev, l]);
-    setSelectedIds([id]);
-  };
-
-  // file input
-  const onFiles = (e)=>{
-    const files = Array.from(e.target.files || []);
-    files.forEach((f, idx)=> addPhoto(f, idx));
-    e.target.value = '';
-  };
-
-  // selection helpers
-  const setSelected = (ids, additive=false)=>{
-    if(additive) setSelectedIds(prev => Array.from(new Set([...prev, ...ids])));
-    else setSelectedIds(ids);
-  };
-
-  // pointer drag/resize handling
-  // dragRef: {mode:'drag'|'resize', corner, startX,startY, originLayers, ids, primaryId, aspect}
-  const onPointerDownLayer = (e, layer, corner=null)=>{
-    e.preventDefault(); e.stopPropagation();
-    const multi = e.ctrlKey || e.metaKey || e.shiftKey;
-    if(multi){
-      if(!selectedIds.includes(layer.id)) setSelectedIds(prev => [...prev, layer.id]);
-    } else {
-      setSelectedIds([layer.id]);
-    }
-    const origin = layers.map(l=> ({...l}));
-    dragRef.current = { mode: corner ? 'resize' : 'drag', corner, startX: e.clientX, startY: e.clientY, origin, ids: multi ? (selectedIds.includes(layer.id) ? selectedIds : [...selectedIds, layer.id]) : [layer.id], primaryId: layer.id, aspect: layer.width / layer.height };
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-  };
-
-  const onPointerMove = (e)=>{
-    if(!dragRef.current) return;
-    const d = dragRef.current;
-    const dx = e.clientX - d.startX; const dy = e.clientY - d.startY;
-    if(d.mode === 'drag'){
-      const prim = d.origin.find(l=> l.id === d.primaryId) || d.origin[0];
-      const attempt = computeSnap({...prim, x: prim.x + dx, y: prim.y + dy, width: prim.width, height: prim.height});
-      const deltaX = attempt.x - prim.x; const deltaY = attempt.y - prim.y;
-      setLayers(prev => prev.map(l => {
-        if(d.ids.includes(l.id)){
-          const o = d.origin.find(x=> x.id === l.id);
-          return computeSnap({...o, x: o.x + deltaX, y: o.y + deltaY, width: o.width, height: o.height});
+      // 整列
+      const align = (mode)=>{
+        if(selectedIds.length===0) return;
+        if(mode==="centerX"){
+          setObjects(prev=>prev.map(o=>selectedIds.includes(o.id)?{...o,x:cw/2 - o.w/2}:o));
+        } else if(mode==="centerY"){
+          setObjects(prev=>prev.map(o=>selectedIds.includes(o.id)?{...o,y:ch/2 - o.h/2}:o));
+        } else if(mode==="left"){
+          setObjects(prev=>prev.map(o=>selectedIds.includes(o.id)?{...o,x:0}:o));
+        } else if(mode==="right"){
+          setObjects(prev=>prev.map(o=>selectedIds.includes(o.id)?{...o,x:cw-o.w}:o));
         }
-        return l;
-      }));
-    } else if(d.mode === 'resize'){
-      if(d.ids.length !== 1) return;
-      const base = d.origin.find(l=> l.id === d.ids[0]);
-      if(!base) return;
-      let nx = base.x, ny = base.y, nw = base.width, nh = base.height;
-      const c = d.corner;
-      if(c==='se'){ nw = base.width + dx; nh = base.height + dy; }
-      if(c==='ne'){ nw = base.width + dx; nh = base.height - dy; ny = base.y + dy; }
-      if(c==='sw'){ nw = base.width - dx; nh = base.height + dy; nx = base.x + dx; }
-      if(c==='nw'){ nw = base.width - dx; nh = base.height - dy; nx = base.x + dx; ny = base.y + dy; }
-      if(shiftRef.current){
-        const aspect = d.aspect || (base.width/base.height || 1);
-        nw = Math.max(10, nw); nh = Math.max(8, Math.round(nw / aspect));
-      }
-      const snapped = computeSnap({...base, x:nx, y:ny, width: Math.max(10, nw), height: Math.max(8, nh)});
-      setLayers(prev => prev.map(l => l.id === base.id ? {...l, x: snapped.x, y: snapped.y, width: snapped.width, height: snapped.height} : l));
-    }
-  };
+      };
 
-  const onPointerUp = ()=>{
-    dragRef.current = null;
-    window.removeEventListener('pointermove', onPointerMove);
-    window.removeEventListener('pointerup', onPointerUp);
-  };
+      // 保存
+      const saveAsImage = async ()=>{
+        const canvas = await html2canvas(containerRef.current,{scale:2});
+        const link = document.createElement("a");
+        link.download="workspace.png";
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      };
 
-  // keyboard handling (avoid when editing)
-  useEffect(()=>{
-    const onKeyDown = (e)=>{
-      if(e.key === 'Shift') shiftRef.current = true;
-      const active = document.activeElement;
-      const editingActive = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
-      if(editingActive) return;
-      if(selectedIds.length === 0) return;
-      const step = e.shiftKey ? 10 : 1;
-      if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
-        e.preventDefault();
-        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
-        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-        setLayers(prev => prev.map(l => selectedIds.includes(l.id) ? computeSnap({...l, x: l.x + dx, y: l.y + dy}) : l));
-      }
-      if((e.key === 'Backspace' || e.key === 'Delete') && !editingActive){
-        setLayers(prev => prev.filter(l => !selectedIds.includes(l.id)));
-        setSelectedIds([]);
-      }
-    };
-    const onKeyUp = (e)=> { if(e.key === 'Shift') shiftRef.current = false; };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return ()=> { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
-  },[selectedIds, layers, snapOn]);
-
-  // align / distribute
-  const align = (mode)=>{
-    if(selectedIds.length < 1) return;
-    const sel = layers.filter(l=> selectedIds.includes(l.id));
-    const left = Math.min(...sel.map(s=>s.x));
-    const top = Math.min(...sel.map(s=>s.y));
-    const right = Math.max(...sel.map(s=> s.x + s.width));
-    const bottom = Math.max(...sel.map(s=> s.y + s.height));
-    const cx = (left + right)/2;
-    const cy = (top + bottom)/2;
-    setLayers(prev => prev.map(l => {
-      if(!selectedIds.includes(l.id)) return l;
-      if(mode==='left') return computeSnap({...l, x:left});
-      if(mode==='centerX') return computeSnap({...l, x: Math.round(cx - l.width/2)});
-      if(mode==='right') return computeSnap({...l, x: Math.round(right - l.width)});
-      if(mode==='top') return computeSnap({...l, y:top});
-      if(mode==='centerY') return computeSnap({...l, y: Math.round(cy - l.height/2)});
-      if(mode==='bottom') return computeSnap({...l, y: Math.round(bottom - l.height)});
-      return l;
-    }));
-  };
-
-  const distribute = (axis)=>{
-    if(selectedIds.length < 3) return;
-    const sel = layers.filter(l => selectedIds.includes(l.id)).sort((a,b)=> axis==='x'? a.x - b.x : a.y - b.y);
-    const start = axis==='x' ? sel[0].x : sel[0].y;
-    const end = axis==='x' ? (sel[sel.length-1].x + sel[sel.length-1].width) : (sel[sel.length-1].y + sel[sel.length-1].height);
-    const total = sel.reduce((s,l)=> s + (axis==='x'? l.width: l.height), 0);
-    const gaps = sel.length - 1;
-    const gap = Math.max(0, (end - start - total) / gaps);
-    let pos = start;
-    const ps = {};
-    sel.forEach(l => { ps[l.id] = pos; pos += (axis==='x'? l.width: l.height) + gap; });
-    setLayers(prev => prev.map(l => selectedIds.includes(l.id) ? (axis==='x'? computeSnap({...l, x: Math.round(ps[l.id])}) : computeSnap({...l, y: Math.round(ps[l.id])})) : l));
-  };
-
-  // editing text overlay
-  const [editingValueLocal, setEditingValueLocal] = useState('');
-  const editingRef = useRef(null);
-
-  const startEditing = (layer) => {
-    if(layer.type !== 'text') return;
-    setEditingId(layer.id);
-    setEditingValueLocal(layer.text || layer.content || '');
-    setTimeout(()=> { try{ if(editingRef.current) editingRef.current.focus(); }catch(e){} }, 0);
-  };
-
-  const commitEditing = () => {
-    if(!editingId) return;
-    setLayers(prev => prev.map(l => l.id === editingId ? {...l, text: editingValueLocal, content: editingValueLocal} : l));
-    setEditingId(null);
-    setEditingValueLocal('');
-  };
-
-  // export high quality
-  const exportImage = async (format='png', scale=1, quality=0.98)=>{
-    const W = Math.round(canvasSize.w * scale), H = Math.round(canvasSize.h * scale);
-    const cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
-    const ctx = cvs.getContext('2d');
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,W,H);
-    for(const l of layers){
-      if(!l.visible) continue;
-      if(l.type === 'photo'){
-        await new Promise(res=>{
-          const img = new Image(); img.crossOrigin='anonymous';
-          img.onload = ()=>{ ctx.drawImage(img, l.x*scale, l.y*scale, l.width*scale, l.height*scale); res(); };
-          img.onerror = ()=> res();
-          img.src = l.url;
-        });
-      } else if(l.type === 'text'){
-        ctx.save();
-        const size = Math.round((l.fontSize||22) * scale);
-        ctx.fillStyle = l.color || '#000';
-        ctx.font = `${l.weight||600} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
-        ctx.textBaseline = 'top';
-        const maxW = l.width * scale;
-        const paras = (l.text || l.content || '').split('\n');
-        let y = l.y * scale;
-        const lh = Math.round(size * (l.lineHeight || 1.3));
-        for(const p of paras){
-          const words = p.split(' ');
-          let line = '';
-          for(const w of words){
-            const test = line ? (line + ' ' + w) : w;
-            if(ctx.measureText(test).width > maxW && line){ ctx.fillText(line, l.x*scale, y); line = w; y += lh; } else { line = test; }
-          }
-          ctx.fillText(line, l.x*scale, y);
-          y += lh;
-        }
-        ctx.restore();
-      }
-    }
-    const mime = format === 'png' ? 'image/png' : format==='jpeg'? 'image/jpeg' : 'image/webp';
-    const q = format==='png' ? 1 : quality;
-    const data = cvs.toDataURL(mime, q);
-    const a = document.createElement('a'); a.href = data; a.download = `frame_export.${format}`; a.click();
-  };
-
-  // render
-  return (
-    <div style={{padding:14}}>
-      <div className="wrap">
-        {/* left */}
-        <div className="card">
-          <div className="h">レイヤー & ツール</div>
-
-          <div style={{marginBottom:8}}>
-            <input type="file" accept="image/*" multiple ref={fileRef} onChange={(e)=>{ const fs = Array.from(e.target.files || []); fs.forEach((f, i)=> addPhoto(f, i)); e.target.value=''; }} />
-            <button className="btn" style={{marginLeft:8}} onClick={()=> addText()}>テキスト追加</button>
-          </div>
-
-          <div style={{marginBottom:10}}>
-            <div className="small" style={{marginBottom:6}}>プリセット</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-              {PRESETS.map(p=> <button key={p.key} className={`btn ${preset===p.key? 'primary':''}`} onClick={()=> setPreset(p.key)}>{p.label}</button>)}
-            </div>
-          </div>
-
-          <div style={{marginBottom:10}}>
-            <div className="small" style={{marginBottom:6}}>表示/操作</div>
-            <label style={{display:'block',marginBottom:6}}><input type="checkbox" checked={gridOn} onChange={(e)=> setGridOn(e.target.checked)} /> グリッド</label>
-            <label style={{display:'block',marginBottom:6}}><input type="checkbox" checked={snapOn} onChange={(e)=> setSnapOn(e.target.checked)} /> スナップ</label>
-          </div>
-
-          <div className="h small">レイヤー</div>
-          <div className="layer-list" style={{marginBottom:8}}>
-            {layers.map((l, idx)=>(
-              <div key={l.id} className="layer-row" style={{border: selectedIds.includes(l.id)? '1px solid rgba(37,99,235,0.12)': '1px solid transparent', marginBottom:6, padding:8}}>
-                <input type="checkbox" checked={l.visible} onChange={(e)=> setLayers(prev => prev.map(x=> x.id===l.id? {...x, visible: e.target.checked}: x))} />
-                <div style={{flex:1, fontSize:13}}>{l.name || l.type}</div>
-                <button className="btn" onClick={(e)=> { e.stopPropagation(); setSelectedIds([l.id]); }}>選択</button>
-                <button className="btn" onClick={(e)=> { e.stopPropagation(); setLayers(prev => prev.filter(x=> x.id!==l.id)); setSelectedIds(prev=> prev.filter(id=> id!==l.id)); }}>削除</button>
-              </div>
+      return (
+        <div className="flex flex-col items-center p-4 space-y-2">
+          <h1 className="text-xl font-bold">📸 写真フレームエディタ</h1>
+          <div className="flex gap-2">
+            {Object.keys(aspectRatios).map(r=>(
+              <button key={r} onClick={()=>setRatio(r)} className={`px-2 py-1 ${r===ratio?"bg-blue-500 text-white":"bg-gray-200"}`}>
+                {r}
+              </button>
             ))}
           </div>
-
-          <div className="h small">整列 / 分布</div>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            <button className="btn" onClick={()=> align('left')}>左揃え</button>
-            <button className="btn" onClick={()=> align('centerX')}>中央X</button>
-            <button className="btn" onClick={()=> align('right')}>右揃え</button>
-            <button className="btn" onClick={()=> align('top')}>上揃え</button>
-            <button className="btn" onClick={()=> align('centerY')}>中央Y</button>
-            <button className="btn" onClick={()=> align('bottom')}>下揃え</button>
-            <button className="btn" onClick={()=> distribute('x')}>分布X</button>
-            <button className="btn" onClick={()=> distribute('y')}>分布Y</button>
+          <div className="flex gap-2">
+            <button onClick={()=>align("centerX")} className="px-2 py-1 bg-gray-200">中央横揃え</button>
+            <button onClick={()=>align("centerY")} className="px-2 py-1 bg-gray-200">中央縦揃え</button>
+            <button onClick={()=>align("left")} className="px-2 py-1 bg-gray-200">左揃え</button>
+            <button onClick={()=>align("right")} className="px-2 py-1 bg-gray-200">右揃え</button>
           </div>
+          <button onClick={saveAsImage} className="px-3 py-1 bg-green-500 text-white">保存</button>
 
-          <div style={{height:10}}></div>
-
-          <div className="h small">書き出し</div>
-          <div style={{display:'flex',gap:8}}>
-            <select id="fmt"><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select>
-            <select id="scale"><option value="1">1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="3">3x</option></select>
-            <button className="btn primary" onClick={()=> { const f=document.getElementById('fmt').value; const s=parseFloat(document.getElementById('scale').value); exportImage(f,s,0.98); }}>書き出し</button>
-          </div>
-        </div>
-
-        {/* canvas */}
-        <div className="canvas-area">
-          <div style={{display:'flex',justifyContent:'space-between',width:'100%'}}>
-            <div className="small">編集キャンバス — {canvasSize.w}×{canvasSize.h}</div>
-            <div className="small">操作：ドラッグ移動 / 角ハンドルでリサイズ / Shiftで等比 / 矢印で1px（Shiftで10px）</div>
-          </div>
-
-          <div className="frame-box" style={{width: canvasSize.w * displayScale, height: canvasSize.h * displayScale, transformOrigin:'top left', transform:`scale(${displayScale})`}} onPointerDown={()=> setSelectedIds([])}>
-            {/* grid */}
-            <div style={{position:'absolute',left:0,top:0,width:canvasSize.w,height:canvasSize.h}} className={gridOn? 'grid-bg' : ''}></div>
-
-            {/* render layers */}
-            {layers.map((l, idx)=> (
-              <div key={l.id} onPointerDown={(e)=> onPointerDownLayer(e, l)} style={{position:'absolute', left:l.x, top:l.y, width:l.width, height:l.height, display: l.visible? 'block':'none', opacity: l.opacity || 1, zIndex:100+idx}} className={selectedIds.includes(l.id)? 'selection-ring':''}>
-                {l.type === 'photo' || l.type === 'image' ? (
-                  <img src={l.url} alt={l.name} draggable={false} style={{width:'100%',height:'100%',objectFit:'cover',pointerEvents:'none',userSelect:'none'}} />
-                ) : (
-                  (editingId === l.id) ? (
-                    <textarea ref={editingRef} className="editing" value={editingValueLocal} onChange={(ev)=> setEditingValueLocal(ev.target.value)} onBlur={()=> commitEditing()} onKeyDown={(ev)=> { if(ev.key==='Enter' && !ev.shiftKey){ ev.preventDefault(); commitEditing(); }}} style={{width:'100%',height:'100%',fontSize: (l.fontSize||22) + 'px', lineHeight: l.lineHeight || 1.2, textAlign: l.align || 'left', color: l.color || '#111'}} />
-                  ) : (
-                    <div onDoubleClick={(ev)=> { ev.stopPropagation(); startEditing(l); }} style={{width:'100%',height:'100%',padding:6,fontSize: (l.fontSize||22) + 'px', lineHeight:l.lineHeight||1.2, textAlign:l.align||'left', whiteSpace:'pre-wrap', overflow:'hidden', cursor:'text', userSelect:'none'}}>
-                      {l.text || l.content}
-                    </div>
-                  )
-                )}
-
-                {/* resize handles only when single selected */}
-                {selectedIds.length === 1 && selectedIds[0] === l.id && (
-                  <>
-                    <div className="handle nw" onPointerDown={(e)=> onPointerDownLayer(e, l, 'nw')}></div>
-                    <div className="handle ne" onPointerDown={(e)=> onPointerDownLayer(e, l, 'ne')}></div>
-                    <div className="handle sw" onPointerDown={(e)=> onPointerDownLayer(e, l, 'sw')}></div>
-                    <div className="handle se" onPointerDown={(e)=> onPointerDownLayer(e, l, 'se')}></div>
-                  </>
-                )}
-              </div>
+          <div ref={containerRef} className="relative bg-white border shadow"
+            style={{width:cw,height:ch}}>
+            {objects.map(o=>(
+              editingId===o.id ? (
+                <textarea key={o.id} autoFocus value={o.content}
+                  onChange={(e)=>setObjects(prev=>prev.map(x=>x.id===o.id?{...x,content:e.target.value}:x))}
+                  onBlur={()=>setEditingId(null)}
+                  onKeyDown={(e)=>{if(e.key==="Enter"){e.preventDefault();setEditingId(null);}}}
+                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray"}}
+                />
+              ) : (
+                <div key={o.id}
+                  className="draggable border border-gray-300"
+                  style={{left:o.x,top:o.y,width:o.w,height:o.h}}
+                  onMouseDown={(e)=>{ if(e.detail===1) onDrag(o.id,e); }}
+                  onDoubleClick={()=>setEditingId(o.id)}
+                  onClick={()=>setSelectedIds([o.id])}
+                >
+                  <div className="editable-text w-full h-full flex items-center justify-center">{o.content}</div>
+                  <div className="resize-handle" onMouseDown={(e)=>onResize(o.id,e)}></div>
+                </div>
+              )
             ))}
-
           </div>
         </div>
-      </div>
+      );
+    }
 
-      {tooltip.tip && <div className="tooltip" style={{left:tooltip.tip.x, top: tooltip.tip.y}}>{tooltip.tip.text}</div>}
-    </div>
-  );
-
-  // local helper functions within component's closure
-  function addText(text='ダブルクリックで編集'){
-    const id = uid();
-    const photos = layers.filter(l=> l.type === 'photo' || l.type === 'image');
-    const belowY = photos.length>0 ? Math.max(...photos.map(p=> p.y + p.height)) + 16 : 40;
-    const t = { id, type:'text', name:`Text ${layers.filter(x=>x.type==='text').length+1}`, visible:true, x:40, y:belowY, width: Math.min(600, canvasSize.w - 80), height:60, text, fontSize:22, lineHeight:1.3, align:'left', color:'#111' };
-    setLayers(prev => [...prev, t]);
-    setSelectedIds([id]);
-  }
-
-  // editing helpers (textarea overlay)
-  const [editingValueLocal, setEditingValueLocal] = useState('');
-  const editingRef = useRef(null);
-
-  function startEditing(layer){
-    if(layer.type !== 'text') return;
-    setEditingId(layer.id);
-    setEditingValueLocal(layer.text || layer.content || '');
-    setTimeout(()=> { try{ const ta = document.querySelector('textarea.editing'); if(ta) ta.focus(); }catch(e){} }, 0);
-  }
-
-  function commitEditing(){
-    if(!editingId) return;
-    setLayers(prev => prev.map(l => l.id === editingId ? {...l, text: editingValueLocal, content: editingValueLocal} : l));
-    setEditingId(null);
-    setEditingValueLocal('');
-  }
-
-} // end App
-
-ReactDOM.render(React.createElement(App), document.getElementById('root'));
-</script>
+    ReactDOM.render(<App/>, document.getElementById("root"));
+  </script>
 </body>
 </html>
