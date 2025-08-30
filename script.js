@@ -1,106 +1,104 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const imageUpload = document.getElementById('imageUpload');
-    const uploadedImage = document.getElementById('uploadedImage');
-    const canvasContainer = document.getElementById('canvasContainer');
-    const snapGuides = document.getElementById('snapGuides');
+/* ベーススタイル */
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: #f0f2f5;
+    color: #333;
+}
 
-    let currentLayer = null; // 現在選択されている（ドラッグ中の）レイヤーや画像
-    let isDragging = false;
-    let initialX, initialY;
-    let xOffset = 0, yOffset = 0;
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
 
-    // --- 1. 画像のアップロードとリサイズ ---
-    imageUpload.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                uploadedImage.src = e.target.result;
-                uploadedImage.style.display = 'block';
-                // 画像が読み込まれたら、現在のレイヤーとして設定
-                currentLayer = uploadedImage;
-                updateSnapGuides(currentLayer); // 初期スナップガイドの表示
-            };
-            reader.readAsDataURL(file);
-        }
-    });
+header {
+    background-color: #ffffff;
+    padding: 10px 20px;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
 
-    // --- 3. スナップ機能の修正 ---
-    // レイアウト変更時や画像ロード時にスナップガイドを更新する
-    const updateSnapGuides = (layerElement) => {
-        if (!layerElement || layerElement.style.display === 'none') {
-            snapGuides.style.display = 'none';
-            return;
-        }
+#editorContainer {
+    display: flex;
+    flex-grow: 1;
+    background-color: #f8f9fa;
+}
 
-        const containerRect = canvasContainer.getBoundingClientRect();
-        const layerRect = layerElement.getBoundingClientRect();
+#canvasContainer {
+    flex-grow: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+    background-color: #e9ecef;
+    border: 1px dashed #ccc;
+    margin: 20px;
+}
 
-        // レイヤーの中央座標を計算 (canvasContainerに対する相対位置)
-        const layerCenterX = layerRect.left + layerRect.width / 2 - containerRect.left;
-        const layerCenterY = layerRect.top + layerRect.height / 2 - containerRect.top;
+#sidebar {
+    width: 250px;
+    background-color: #ffffff;
+    border-left: 1px solid #ddd;
+    padding: 20px;
+    box-shadow: -2px 0 5px rgba(0,0,0,0.05);
+}
 
-        // スナップガイドの位置を更新
-        const horizontalGuide = snapGuides.querySelector('.snap-line.horizontal');
-        const verticalGuide = snapGuides.querySelector('.snap-line.vertical');
+/* 画像とハンドルをラップするコンテナ */
+#imageWrapper {
+    position: absolute;
+    cursor: grab;
+    border: 1px solid blue; /* 選択時の枠線 */
+}
 
-        if (horizontalGuide && verticalGuide) {
-            horizontalGuide.style.top = `${layerCenterY}px`;
-            verticalGuide.style.left = `${layerCenterX}px`;
-            snapGuides.style.display = 'block';
-        }
-    };
+#uploadedImage {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
 
-    // 画像のロード完了時にもスナップガイドを更新
-    uploadedImage.onload = () => {
-        updateSnapGuides(uploadedImage);
-    };
+/* リサイズハンドル */
+.resize-handle {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #007bff;
+    border: 1px solid #fff;
+    border-radius: 50%;
+    z-index: 200;
+}
 
-    // リサイズイベントが発生した場合にもスナップガイドを更新
-    window.addEventListener('resize', () => {
-        if (currentLayer) {
-            updateSnapGuides(currentLayer);
-        }
-    });
+.top-left { top: -6px; left: -6px; cursor: nwse-resize; }
+.top-right { top: -6px; right: -6px; cursor: nesw-resize; }
+.bottom-left { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.bottom-right { bottom: -6px; right: -6px; cursor: nwse-resize; }
 
-    // --- レイアードラッグ機能 (参考) ---
-    // 実際にはより高度なドラッグ＆リサイズライブラリを使用することが多いです
-    canvasContainer.addEventListener('mousedown', (e) => {
-        if (e.target === uploadedImage) {
-            isDragging = true;
-            currentLayer = uploadedImage;
-            initialX = e.clientX - xOffset;
-            initialY = e.clientY - yOffset;
-            currentLayer.style.cursor = 'grabbing';
-        }
-    });
+/* スナップガイド */
+#snapGuides {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
 
-    canvasContainer.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
+.snap-line {
+    background-color: rgba(255, 0, 0, 0.5);
+    position: absolute;
+    z-index: 1000;
+}
 
-        e.preventDefault(); // デフォルトのドラッグ動作を防止
+.snap-line.horizontal {
+    width: 100%;
+    height: 1px;
+}
 
-        xOffset = e.clientX - initialX;
-        yOffset = e.clientY - initialY;
-
-        if (currentLayer) {
-            currentLayer.style.transform = `translate(${xOffset}px, ${yOffset}px)`;
-            updateSnapGuides(currentLayer); // ドラッグ中にスナップガイドを更新
-        }
-    });
-
-    canvasContainer.addEventListener('mouseup', () => {
-        isDragging = false;
-        if (currentLayer) {
-            currentLayer.style.cursor = 'grab';
-        }
-    });
-
-    canvasContainer.addEventListener('mouseleave', () => {
-        // コンテナ外に出た場合もドラッグを終了
-        isDragging = false;
-        if (currentLayer) {
-            currentLayer.style.cursor = 'grab';
-        }
-    });
-});
+.snap-line.vertical {
+    width: 1px;
+    height: 100%;
+}
