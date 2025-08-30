@@ -1,216 +1,816 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Exifフレームエディタ</title>
-  <!-- React & Babel -->
-  <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Tailwind -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- html2canvas -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <!-- exif-js -->
-  <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
-  <style>
-    @font-face {
-      font-family: 'CorporateLogo';
-      src: url('./Corporate-Logo-Bold-ver3.otf') format('opentype');
-    }
-    body { font-family: 'CorporateLogo', -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; }
-    .draggable { position:absolute; cursor:move; }
-    .editable-text { white-space: pre-wrap; text-align: center; }
-    .resize-handle { width:10px; height:10px; background:#2563eb; position:absolute; right:-5px; bottom:-5px; cursor:se-resize; }
-    .grid-line { position:absolute; background:#e5e7eb; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>確実に動く Exif フレームエディタ（Grid/Snap/Text Toolbar）</title>
+
+<!-- exif-js for metadata -->
+<script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+
+<style>
+:root{
+  --bg:#f6f8fb; --panel:#fff; --muted:#6b7280; --accent:#2563eb; --text:#0f172a;
+  --grid:#e6eef8;
+}
+html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Segoe UI",Roboto,Arial;background:var(--bg);color:var(--text)}
+.container{max-width:1400px;margin:18px auto;padding:16px;display:grid;grid-template-columns:320px 1fr 260px;gap:12px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--grid);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(8,20,40,0.04)}
+.h{font-weight:700;margin-bottom:8px}
+.btn{border:1px solid var(--grid);background:#fff;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.small{font-size:13px;color:var(--muted)}
+.layer-list{max-height:38vh;overflow:auto}
+.layer-row{display:flex;gap:8px;align-items:center;padding:8px;border-radius:8px}
+.layer-row.selected{background:#eef6ff}
+.canvas-area{display:flex;flex-direction:column;gap:8px;align-items:center}
+.frame-box{position:relative;border-radius:10px;overflow:hidden;background:#fff;box-shadow:0 8px 28px rgba(8,20,40,0.06)}
+.canvas-inner{position:relative;left:0;top:0;transform-origin:top left}
+.grid-bg{background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px)}
+.layer-item{position:absolute;box-sizing:border-box;user-select:none}
+.layer-item.selection{outline:3px solid rgba(37,99,235,0.12);box-shadow:0 0 0 6px rgba(37,99,235,0.04) inset}
+.handle{position:absolute;width:12px;height:12px;background:var(--accent);border-radius:3px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.12);z-index:999}
+.handle.hidden{display:none}
+.handle.br{right:-8px;bottom:-8px;cursor:se-resize}
+.text-layer{display:flex;flex-direction:column;align-items:center;justify-content:center;white-space:pre-wrap;text-align:center;pointer-events:none}
+.toolbar{position:fixed;right:18px;top:18px;background:#fff;border:1px solid var(--grid);padding:10px;border-radius:10px;box-shadow:0 8px 30px rgba(11,20,40,0.06);width:220px;z-index:2000}
+.toolbar .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+input[type="color"]{padding:0;border:none;background:transparent;height:28px;width:40px}
+input[type="number"]{width:72px}
+.preset{padding:6px 8px;border-radius:8px;border:1px solid var(--grid);background:#fff;cursor:pointer;font-size:13px}
+.preset.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.small-note{font-size:12px;color:var(--muted)}
+@media (max-width:1100px){ .container{grid-template-columns:1fr; } .toolbar{position:fixed;right:12px;top:auto;bottom:12px;width:220px} }
+</style>
 </head>
-<body class="bg-gray-100">
-  <div id="root"></div>
+<body>
+<div class="container">
 
-  <script type="text/babel">
+  <!-- LEFT: controls -->
+  <div class="card">
+    <div class="h">ツール</div>
 
-    const { useState, useRef } = React;
+    <div style="margin-bottom:8px">
+      <label class="btn">画像追加 <input id="fileInput" type="file" accept="image/*" multiple style="display:none"></label>
+      <button id="addTextBtn" class="btn" style="margin-left:8px">テキスト追加</button>
+    </div>
 
-    const aspectRatios = {
-      "Instagram (1:1)": [600, 600],
-      "Twitter (16:9)": [960, 540],
-      "YouTube (1280×720)": [1280, 720],
-      "Facebook (1200×630)": [1200, 630],
-    };
+    <div style="margin-bottom:10px">
+      <div class="small">プリセット</div>
+      <div id="presetRow" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px"></div>
+    </div>
 
-    function App(){
-      const [ratio,setRatio] = useState("Instagram (1:1)");
-      const [objects,setObjects] = useState([]);
-      const [editingId,setEditingId] = useState(null);
-      const [selectedId,setSelectedId] = useState(null);
-      const containerRef = useRef(null);
-      const [cw,ch] = aspectRatios[ratio];
-      const snapSize = 50; // グリッド間隔
+    <div style="margin-bottom:10px">
+      <label><input id="gridToggle" type="checkbox" checked> グリッド表示</label><br/>
+      <label><input id="snapToggle" type="checkbox" checked> スナップ有効</label><br/>
+      <label><input id="handlesToggle" type="checkbox" checked> ハンドル表示（UIのみ）</label>
+      <div class="small-note">※ 書き出し時はハンドルは含まれません。</div>
+    </div>
 
-      // スナップ（グリッドに吸着）
-      const snapToGrid = (val)=> Math.round(val / snapSize) * snapSize;
+    <div style="margin-bottom:10px">
+      <div class="small">フォント（アップロードして適用）</div>
+      <input id="fontInput" type="file" accept=".woff,.woff2,.ttf,.otf">
+      <div class="small-note">※ アップロードしたフォントは即 UI に適用され、書き出しにも反映されます。</div>
+    </div>
 
-      // 画像アップロード
-      const handleUpload = (e)=>{
-        const files = Array.from(e.target.files);
-        files.forEach((file,idx)=>{
-          if(!file.type.startsWith("image/")) return;
-          const url = URL.createObjectURL(file);
+    <div class="h small">レイヤー</div>
+    <div id="layerList" class="layer-list"></div>
 
-          EXIF.getData(file, function(){
-            const make = EXIF.getTag(this,"Make") || "";
-            const model = EXIF.getTag(this,"Model") || "";
-            const iso = EXIF.getTag(this,"ISOSpeedRatings") || "";
-            const exposure = EXIF.getTag(this,"ExposureTime") || "";
-            const focal = EXIF.getTag(this,"FocalLength") || "";
+    <div style="margin-top:8px">
+      <div class="h small">書き出し</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+        <select id="fmt"><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select>
+        <select id="scale"><option value="1">1x</option><option value="2">2x</option><option value="3">3x</option></select>
+        <button id="exportBtn" class="btn primary">書き出し</button>
+      </div>
+    </div>
+  </div>
 
-            const textContent = `${make} ${model}\nISO ${iso} 露出 ${exposure} レンズ ${focal}`;
+  <!-- MIDDLE: canvas -->
+  <div class="card canvas-area" style="align-items:center">
+    <div style="display:flex;justify-content:space-between;width:100%">
+      <div id="canvasInfo" class="small">キャンバス</div>
+      <div class="small">操作：ドラッグ / 角ハンドルでリサイズ（Shiftで等比） / ダブルクリックでテキスト編集</div>
+    </div>
 
-            setObjects(prev=>[
-              ...prev,
-              {id:Date.now()+idx, type:"image", url, x:cw/2-150, y:ch/2-100, w:300, h:200},
-              {id:Date.now()+idx+1000, type:"text", content:textContent, x:cw/2-100, y:ch/2+120, w:200, h:60, bold:true, color:"#000", size:16, italic:false, underline:false}
-            ]);
+    <div id="frameBox" class="frame-box" style="width:800px;height:800px;margin-top:8px">
+      <div id="canvasInner" class="canvas-inner" style="width:800px;height:800px"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: toolbar (shown when a text layer selected) -->
+  <div id="toolbar" class="toolbar" style="display:none">
+    <div class="row">
+      <button id="tbBold" class="btn">B</button>
+      <button id="tbItalic" class="btn">I</button>
+      <button id="tbUnderline" class="btn">U</button>
+    </div>
+    <div class="row">
+      <label class="small">サイズ</label>
+      <input id="tbSize" type="number" min="6" max="200" value="22">
+    </div>
+    <div class="row">
+      <label class="small">色</label>
+      <input id="tbColor" type="color" value="#111111">
+      <select id="fontSelect" style="flex:1">
+        <option value="">システムフォント</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="alignLeft" class="btn">左</button>
+      <button id="alignCenter" class="btn">中</button>
+      <button id="alignRight" class="btn">右</button>
+    </div>
+    <div style="margin-top:6px"><button id="tbApply" class="btn primary">適用</button></div>
+  </div>
+
+</div>
+
+<script>
+/* =========================
+   Pure Vanilla JS App
+   - Grid snap (grid + edges + centers)
+   - Text toolbar (Word-like): bold/italic/underline/size/color/align/font
+   - Image drag + resize (shift = aspect lock)
+   - Offscreen canvas export (no handles)
+   ========================= */
+
+(() => {
+  // Config
+  const PRESETS = [
+    {key:'instagram', label:'Instagram 1:1', w:1080, h:1080},
+    {key:'story', label:'Story 9:16', w:1080, h:1920},
+    {key:'x', label:'X 16:9', w:1920, h:1080},
+    {key:'youtube', label:'YouTube 1280×720', w:1280, h:720},
+    {key:'facebook', label:'Facebook 1200×630', w:1200, h:630},
+  ];
+  let canvasW = 1080, canvasH = 1080;
+  let displayScale = 1;
+  let gridOn = true, snapOn = true, handlesVisible = true;
+  let gridSize = 50; // grid spacing
+  const SNAP_RANGE = 10; // px threshold for snap
+  let shiftDown = false;
+  let loadedFontName = null;
+
+  // Layers state
+  let layers = []; // {id,type('photo'|'text'),name,visible,x,y,width,height,url,text,fontSize,lineHeight,align,color,bold,italic,underline}
+  let selectedId = null;
+  let editingId = null;
+
+  // DOM refs
+  const fileInput = document.getElementById('fileInput');
+  const addTextBtn = document.getElementById('addTextBtn');
+  const presetRow = document.getElementById('presetRow');
+  const frameBox = document.getElementById('frameBox');
+  const canvasInner = document.getElementById('canvasInner');
+  const canvasInfo = document.getElementById('canvasInfo');
+  const gridToggle = document.getElementById('gridToggle');
+  const snapToggle = document.getElementById('snapToggle');
+  const handlesToggle = document.getElementById('handlesToggle');
+  const fontInput = document.getElementById('fontInput');
+  const exportBtn = document.getElementById('exportBtn');
+  const fmtSel = document.getElementById('fmt');
+  const scaleSel = document.getElementById('scale');
+  const layerList = document.getElementById('layerList');
+
+  // toolbar refs
+  const toolbar = document.getElementById('toolbar');
+  const tbBold = document.getElementById('tbBold');
+  const tbItalic = document.getElementById('tbItalic');
+  const tbUnderline = document.getElementById('tbUnderline');
+  const tbSize = document.getElementById('tbSize');
+  const tbColor = document.getElementById('tbColor');
+  const fontSelect = document.getElementById('fontSelect');
+  const alignLeft = document.getElementById('alignLeft');
+  const alignCenter = document.getElementById('alignCenter');
+  const alignRight = document.getElementById('alignRight');
+  const tbApply = document.getElementById('tbApply');
+
+  // Init UI
+  function init() {
+    // presets
+    PRESETS.forEach(p => {
+      const b = document.createElement('button');
+      b.className = 'preset';
+      b.textContent = p.label;
+      b.onclick = () => setPreset(p.key);
+      if (p.key === 'instagram') b.classList.add('active');
+      presetRow.appendChild(b);
+    });
+
+    fileInput.addEventListener('change', onFiles);
+    addTextBtn.addEventListener('click', () => createTextLayer('ダブルクリックで編集'));
+    gridToggle.addEventListener('change', (e) => { gridOn = e.target.checked; renderCanvas(); });
+    snapToggle.addEventListener('change', (e) => { snapOn = e.target.checked; });
+    handlesToggle.addEventListener('change', (e) => { handlesVisible = e.target.checked; renderCanvas(); });
+    fontInput.addEventListener('change', onFontFile);
+    exportBtn.addEventListener('click', () => exportImage(fmtSel.value, parseFloat(scaleSel.value)));
+
+    tbBold.addEventListener('click', () => toggleTool('bold'));
+    tbItalic.addEventListener('click', () => toggleTool('italic'));
+    tbUnderline.addEventListener('click', () => toggleTool('underline'));
+    alignLeft.addEventListener('click', () => setAlignment('left'));
+    alignCenter.addEventListener('click', () => setAlignment('center'));
+    alignRight.addEventListener('click', () => setAlignment('right'));
+    tbApply.addEventListener('click', applyToolbar);
+
+    window.addEventListener('keydown', (e) => { if (e.key === 'Shift') shiftDown = true; });
+    window.addEventListener('keyup', (e) => { if (e.key === 'Shift') shiftDown = false; });
+
+    window.addEventListener('resize', updateScale);
+
+    // default preset
+    setPreset('instagram');
+    // add fontSelect default
+    addFontOption('システムフォント', '');
+  }
+
+  function setPreset(key) {
+    const p = PRESETS.find(x => x.key === key);
+    if (!p) return;
+    canvasW = p.w; canvasH = p.h;
+    // mark active
+    Array.from(presetRow.children).forEach(b => b.classList.toggle('active', b.textContent === p.label));
+    updateScale();
+    // snap existing layers to new frame edges/center
+    layers = layers.map(l => computeSnapRect(l));
+    renderCanvas();
+  }
+
+  function updateScale() {
+    const maxW = Math.round(window.innerWidth * 0.72);
+    const maxH = Math.round(window.innerHeight * 0.78);
+    displayScale = Math.min(1, maxW / canvasW, maxH / canvasH) || 1;
+    frameBox.style.width = (canvasW * displayScale) + 'px';
+    frameBox.style.height = (canvasH * displayScale) + 'px';
+    canvasInner.style.width = canvasW + 'px';
+    canvasInner.style.height = canvasH + 'px';
+    canvasInner.style.transform = `scale(${displayScale})`;
+    canvasInfo.textContent = `キャンバス — ${canvasW} × ${canvasH} (表示 ${Math.round(displayScale*100)}%)`;
+  }
+
+  // Files -> add photo layer + exif text
+  function onFiles(e) {
+    const files = Array.from(e.target.files || []);
+    files.forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const natW = img.naturalWidth || canvasW;
+        const natH = img.naturalHeight || canvasH;
+        const baseW = Math.min(Math.max(360, Math.round(canvasW * 0.45)), natW || Math.round(canvasW * 0.6));
+        const ratio = (natW && natH) ? (natW / natH) : (16/9);
+        const baseH = Math.round(baseW / ratio);
+        // center placement
+        const x = Math.round((canvasW - baseW) / 2);
+        const y = Math.round((canvasH - baseH) / 2);
+        const layer = { id: uid(), type: 'photo', name: 'Photo', visible: true, x, y, width: baseW, height: baseH, url };
+        layers.push(layer);
+        // EXIF text
+        try {
+          EXIF.getData(file, function () {
+            const make = EXIF.getTag(this, 'Make') || '';
+            const model = EXIF.getTag(this, 'Model') || '';
+            const iso = EXIF.getTag(this, 'ISOSpeedRatings') || '';
+            const exposure = EXIF.getTag(this, 'ExposureTime') || '';
+            const focal = EXIF.getTag(this, 'FocalLength') || '';
+            const meta = [ [make, model].filter(Boolean).join(' '), [focal ? `${focal}mm` : '', exposure ? `${exposure}s` : '', iso ? `ISO ${iso}` : ''].filter(Boolean).join(' | ') ].filter(Boolean).join('\n');
+            if (meta) {
+              const txW = Math.min(600, canvasW - 80);
+              const txX = Math.round((canvasW - txW) / 2);
+              const txY = Math.min(canvasH - 60, layer.y + layer.height + 8);
+              const tLayer = { id: uid(), type: 'text', name: 'EXIF', visible: true, x: txX, y: txY, width: txW, height: 60, text: meta, fontSize: 18, lineHeight: 1.2, align: 'center', color: '#111', boldFirstLine: true };
+              layers.push(tLayer);
+            }
+            renderCanvas();
           });
-        });
+        } catch (err) {
+          renderCanvas();
+        }
       };
+      img.src = url;
+    });
+    e.target.value = '';
+  }
 
-      // 移動
-      const onDrag = (id,e)=>{
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const obj = objects.find(o=>o.id===id);
-        const initX = obj.x;
-        const initY = obj.y;
-        const move = (ev)=>{
-          const dx = ev.clientX - startX;
-          const dy = ev.clientY - startY;
-          const newX = snapToGrid(initX+dx);
-          const newY = snapToGrid(initY+dy);
-          setObjects(prev=>prev.map(o=>o.id===id?{...o,x:newX,y:newY}:o));
-        };
-        const up = ()=>{
-          window.removeEventListener("mousemove",move);
-          window.removeEventListener("mouseup",up);
-        };
-        window.addEventListener("mousemove",move);
-        window.addEventListener("mouseup",up);
-      };
+  function createTextLayer(text = 'ダブルクリックで編集') {
+    const w = Math.min(600, canvasW - 80);
+    const h = 60;
+    const x = Math.round((canvasW - w) / 2);
+    const y = Math.round((canvasH - h) / 2);
+    const l = { id: uid(), type: 'text', name: 'Text', visible: true, x, y, width: w, height: h, text, fontSize: 22, lineHeight: 1.3, align: 'center', color: '#111', bold:false, italic:false, underline:false };
+    layers.push(l);
+    selectedId = l.id;
+    renderCanvas();
+  }
 
-      // サイズ変更
-      const onResize = (id,e)=>{
-        e.stopPropagation();
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const obj = objects.find(o=>o.id===id);
-        const initW = obj.w;
-        const initH = obj.h;
-        const move = (ev)=>{
-          const dw = ev.clientX - startX;
-          const dh = ev.clientY - startY;
-          const newW = Math.max(30,snapToGrid(initW+dw));
-          const newH = Math.max(20,snapToGrid(initH+dh));
-          setObjects(prev=>prev.map(o=>o.id===id?{...o,w:newW,h:newH}:o));
-        };
-        const up = ()=>{
-          window.removeEventListener("mousemove",move);
-          window.removeEventListener("mouseup",up);
-        };
-        window.addEventListener("mousemove",move);
-        window.addEventListener("mouseup",up);
-      };
-
-      // 保存
-      const saveAsImage = async ()=>{
-        const handles = document.querySelectorAll(".resize-handle");
-        handles.forEach(h=>h.style.display="none");
-        const canvas = await html2canvas(containerRef.current,{scale:2});
-        const link = document.createElement("a");
-        link.download="workspace.png";
-        link.href = canvas.toDataURL("image/png");
-        link.click();
-        handles.forEach(h=>h.style.display="block");
-      };
-
-      // テキスト編集ツールバー
-      const toolbar = ()=>{
-        const obj = objects.find(o=>o.id===selectedId);
-        if(!obj || obj.type!=="text") return null;
-        return (
-          <div className="fixed right-4 top-20 bg-white border shadow p-2 flex flex-col space-y-2">
-            <button onClick={()=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,bold:!o.bold}:o))}
-              className={`${obj.bold?"bg-gray-300":""}`}>B</button>
-            <button onClick={()=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,italic:!o.italic}:o))}
-              className={`${obj.italic?"bg-gray-300":""}`}>I</button>
-            <button onClick={()=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,underline:!o.underline}:o))}
-              className={`${obj.underline?"bg-gray-300":""}`}>U</button>
-            <input type="color" value={obj.color} onChange={(e)=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,color:e.target.value}:o))}/>
-            <input type="number" value={obj.size} onChange={(e)=>setObjects(prev=>prev.map(o=>o.id===selectedId?{...o,size:parseInt(e.target.value)}:o))}/>
-          </div>
-        );
-      };
-
-      return (
-        <div className="flex flex-col items-center p-4 space-y-2">
-          <h1 className="text-xl font-bold">📸 Exifフレームエディタ</h1>
-          <div className="flex gap-2">
-            {Object.keys(aspectRatios).map(r=>(
-              <button key={r} onClick={()=>setRatio(r)} className={`px-2 py-1 ${r===ratio?"bg-blue-500 text-white":"bg-gray-200"}`}>
-                {r}
-              </button>
-            ))}
-          </div>
-          <input type="file" accept="image/*" multiple onChange={handleUpload} />
-          <button onClick={saveAsImage} className="px-3 py-1 bg-green-500 text-white">保存</button>
-
-          <div ref={containerRef} className="relative bg-white border shadow"
-            style={{width:cw,height:ch}}>
-            {/* グリッド線 */}
-            {[...Array(Math.floor(cw/snapSize))].map((_,i)=>(
-              <div key={`v${i}`} className="grid-line" style={{left:i*snapSize,top:0,width:1,height:ch}}/>
-            ))}
-            {[...Array(Math.floor(ch/snapSize))].map((_,i)=>(
-              <div key={`h${i}`} className="grid-line" style={{top:i*snapSize,left:0,height:1,width:cw}}/>
-            ))}
-            {/* オブジェクト */}
-            {objects.map(o=>(
-              editingId===o.id ? (
-                <textarea key={o.id} autoFocus value={o.content}
-                  onChange={(e)=>setObjects(prev=>prev.map(x=>x.id===o.id?{...x,content:e.target.value}:x))}
-                  onBlur={()=>{setEditingId(null); setSelectedId(o.id);}}
-                  onKeyDown={(e)=>{if(e.key==="Enter"){e.preventDefault();setEditingId(null);}}}
-                  style={{position:"absolute",left:o.x,top:o.y,width:o.w,height:o.h,background:"transparent",border:"1px dashed gray",textAlign:"center",fontFamily:"CorporateLogo",fontSize:o.size,color:o.color,fontWeight:o.bold?"bold":"normal",fontStyle:o.italic?"italic":"normal",textDecoration:o.underline?"underline":"none"}}
-                />
-              ) : (
-                <div key={o.id}
-                  className="draggable"
-                  style={{left:o.x,top:o.y,width:o.w,height:o.h,position:"absolute"}}
-                  onMouseDown={(e)=>{ if(e.detail===1) onDrag(o.id,e); setSelectedId(o.id); }}
-                  onDoubleClick={()=>setEditingId(o.id)}
-                >
-                  {o.type==="image" ? 
-                    <div className="w-full h-full relative">
-                      <img src={o.url} className="w-full h-full object-contain"/>
-                      <div className="resize-handle" onMouseDown={(e)=>onResize(o.id,e)}></div>
-                    </div>
-                  :
-                    <div className="editable-text w-full h-full flex flex-col justify-center"
-                      style={{fontFamily:"CorporateLogo",fontSize:o.size,color:o.color,fontWeight:o.bold?"bold":"normal",fontStyle:o.italic?"italic":"normal",textDecoration:o.underline?"underline":"none"}}>
-                      {o.content}
-                    </div>
-                  }
-                </div>
-              )
-            ))}
-          </div>
-          {toolbar()}
-        </div>
-      );
+  // Render canvas: grid + layers
+  function renderCanvas() {
+    // clear
+    while (canvasInner.firstChild) canvasInner.removeChild(canvasInner.firstChild);
+    // grid background
+    if (gridOn) {
+      canvasInner.classList.add('grid-bg');
+      canvasInner.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+    } else {
+      canvasInner.classList.remove('grid-bg');
+      canvasInner.style.backgroundImage = 'none';
     }
 
-    ReactDOM.render(<App/>, document.getElementById("root"));
-  </script>
+    // render layers in order
+    layers.forEach((l, idx) => {
+      if (!l.visible) return;
+      const el = document.createElement('div');
+      el.className = 'layer-item';
+      el.style.left = l.x + 'px';
+      el.style.top = l.y + 'px';
+      el.style.width = l.width + 'px';
+      el.style.height = l.height + 'px';
+      el.dataset.id = l.id;
+      if (selectedId === l.id) el.classList.add('selection');
+
+      if (l.type === 'photo') {
+        const img = document.createElement('img');
+        img.src = l.url;
+        img.draggable = false;
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.objectFit = 'cover';
+        img.style.pointerEvents = 'none';
+        el.appendChild(img);
+      } else if (l.type === 'text') {
+        const t = document.createElement('div');
+        t.className = 'text-layer';
+        t.style.width = '100%';
+        t.style.height = '100%';
+        t.style.fontSize = (l.fontSize || 18) + 'px';
+        t.style.lineHeight = (l.lineHeight || 1.3);
+        t.style.color = l.color || '#111';
+        t.style.textAlign = l.align || 'center';
+        if (loadedFontName) t.style.fontFamily = `"${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+        // bold first line handling
+        const lines = (l.text || '').split('\n');
+        const first = document.createElement('div');
+        first.textContent = lines[0] || '';
+        first.style.fontWeight = l.boldFirstLine || l.bold ? '700' : (l.bold ? '700' : '400');
+        if (l.italic) first.style.fontStyle = 'italic';
+        if (l.underline) first.style.textDecoration = 'underline';
+        const rest = document.createElement('div');
+        rest.textContent = lines.slice(1).join('\n');
+        t.appendChild(first); t.appendChild(rest);
+        // double click to edit
+        t.addEventListener('dblclick', (ev) => { ev.stopPropagation(); startTextEdit(l); });
+        el.appendChild(t);
+      }
+
+      // pointerdown for select & drag
+      el.addEventListener('pointerdown', (ev) => {
+        ev.stopPropagation();
+        selectLayer(l.id);
+        startDrag(ev, l.id);
+      });
+
+      // handles (UI only) - single br handle bottom-right
+      const handle = document.createElement('div');
+      handle.className = 'handle br' + (handlesVisible ? '' : ' hidden');
+      handle.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); startResize(ev, l.id); });
+      el.appendChild(handle);
+
+      canvasInner.appendChild(el);
+    });
+
+    renderLayerList();
+    updateToolbarVisibility();
+  }
+
+  function renderLayerList() {
+    layerList.innerHTML = '';
+    layers.forEach(l => {
+      const row = document.createElement('div');
+      row.className = 'layer-row' + (selectedId === l.id ? ' selected' : '');
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+
+      const left = document.createElement('div');
+      left.style.display = 'flex';
+      left.style.alignItems = 'center';
+      left.style.gap = '8px';
+      const chk = document.createElement('input'); chk.type = 'checkbox'; chk.checked = !!l.visible;
+      chk.addEventListener('change', () => { l.visible = chk.checked; renderCanvas(); });
+      const label = document.createElement('div'); label.textContent = `${l.name || l.type}`;
+      left.appendChild(chk); left.appendChild(label);
+
+      const right = document.createElement('div');
+      right.style.display = 'flex'; right.style.gap = '6px';
+      const sel = document.createElement('button'); sel.className = 'btn'; sel.textContent = '選択';
+      sel.addEventListener('click', (e) => { e.stopPropagation(); selectedId = l.id; renderCanvas(); });
+      const del = document.createElement('button'); del.className = 'btn'; del.textContent = '削除';
+      del.addEventListener('click', (e) => { e.stopPropagation(); deleteLayer(l.id); });
+      right.appendChild(sel); right.appendChild(del);
+
+      row.appendChild(left); row.appendChild(right);
+      row.addEventListener('click', (ev) => {
+        const multi = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+        if (!multi) selectedId = l.id;
+        renderCanvas();
+      });
+
+      layerList.appendChild(row);
+    });
+  }
+
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  function deleteLayer(id) { layers = layers.filter(x => x.id !== id); if (selectedId === id) selectedId = null; renderCanvas(); }
+
+  /* ---------- Pointer / Drag / Resize ---------- */
+
+  function clientToLocal(e) {
+    const rect = canvasInner.getBoundingClientRect();
+    return { x: (e.clientX - rect.left) / displayScale, y: (e.clientY - rect.top) / displayScale };
+  }
+
+  let dragState = null;
+
+  function startDrag(ev, id) {
+    // starts moving primary id only
+    const pt = clientToLocal(ev);
+    const layer = layers.find(l => l.id === id);
+    if (!layer) return;
+    const start = { x: pt.x, y: pt.y };
+    const origin = JSON.parse(JSON.stringify(layer)); // copy
+    dragState = { type: 'drag', id, start, origin, startLayers: JSON.parse(JSON.stringify(layers)) };
+
+    function onMove(e) {
+      if (!dragState) return;
+      const p = clientToLocal(e);
+      const dx = p.x - dragState.start.x;
+      const dy = p.y - dragState.start.y;
+      const attempt = { ...dragState.origin, x: dragState.origin.x + dx, y: dragState.origin.y + dy };
+      const snapped = computeSnapRect(attempt);
+      // apply to that layer
+      layers = layers.map(l => l.id === id ? { ...l, x: snapped.x, y: snapped.y } : l);
+      renderCanvas();
+      showGuides(snapped);
+    }
+    function onUp() { dragState = null; removeGuides(); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  function startResize(ev, id) {
+    ev.preventDefault();
+    const pt = clientToLocal(ev);
+    const base = layers.find(l => l.id === id);
+    if (!base) return;
+    const origin = JSON.parse(JSON.stringify(base));
+    dragState = { type: 'resize', id, startX: pt.x, startY: pt.y, origin, aspect: origin.width / origin.height };
+
+    function onMove(e) {
+      if (!dragState) return;
+      const p = clientToLocal(e);
+      const dx = p.x - dragState.startX;
+      const dy = p.y - dragState.startY;
+      let nw = Math.max(10, dragState.origin.width + dx);
+      let nh = Math.max(8, dragState.origin.height + dy);
+      if (shiftDown) { nh = Math.max(8, Math.round(nw / dragState.aspect)); }
+      const attempt = { ...dragState.origin, width: nw, height: nh };
+      const snapped = computeSnapRect(attempt);
+      layers = layers.map(l => l.id === id ? { ...l, width: snapped.width, height: snapped.height } : l);
+      renderCanvas();
+      showGuides(snapped);
+    }
+
+    function onUp() { dragState = null; removeGuides(); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  /* ---------- Snap logic (grid + frame + other layers edges/centers) ---------- */
+  function computeSnapRect(moving) {
+    if (!snapOn) return clampRect(moving);
+
+    const targetsX = new Set([0, canvasW / 2, canvasW]);
+    const targetsY = new Set([0, canvasH / 2, canvasH]);
+
+    // add grid intersections
+    for (let gx = 0; gx <= canvasW; gx += gridSize) targetsX.add(gx);
+    for (let gy = 0; gy <= canvasH; gy += gridSize) targetsY.add(gy);
+
+    // add other layers edges/centers
+    layers.forEach(l => {
+      if (!l.visible) return;
+      if (l.id === moving.id) return;
+      targetsX.add(l.x);
+      targetsX.add(l.x + l.width / 2);
+      targetsX.add(l.x + l.width);
+      targetsY.add(l.y);
+      targetsY.add(l.y + l.height / 2);
+      targetsY.add(l.y + l.height);
+    });
+
+    // candidate positions for moving
+    const L = moving.x;
+    const CX = moving.x + moving.width / 2;
+    const R = moving.x + moving.width;
+    const T = moving.y;
+    const CY = moving.y + moving.height / 2;
+    const B = moving.y + moving.height;
+
+    // find nearest within SNAP_RANGE for each edge type, choose best
+    function nearest(val, set) {
+      let best = null, bd = Infinity;
+      for (const t of set) {
+        const d = Math.abs(val - t);
+        if (d < bd) { bd = d; best = t; }
+      }
+      return bd <= SNAP_RANGE ? { v: best, d: bd } : null;
+    }
+
+    const nxL = nearest(L, targetsX);
+    const nxC = nearest(CX, targetsX);
+    const nxR = nearest(R, targetsX);
+    const nyT = nearest(T, targetsY);
+    const nyC = nearest(CY, targetsY);
+    const nyB = nearest(B, targetsY);
+
+    // choose nearest among x edges
+    let outX = moving.x;
+    let bestXDist = Infinity;
+    if (nxL && nxL.d < bestXDist) { outX = moving.x + (nxL.v - L); bestXDist = nxL.d; }
+    if (nxC && nxC.d < bestXDist) { outX = moving.x + (nxC.v - CX); bestXDist = nxC.d; }
+    if (nxR && nxR.d < bestXDist) { outX = moving.x + (nxR.v - R); bestXDist = nxR.d; }
+
+    // choose nearest among y edges
+    let outY = moving.y;
+    let bestYDist = Infinity;
+    if (nyT && nyT.d < bestYDist) { outY = moving.y + (nyT.v - T); bestYDist = nyT.d; }
+    if (nyC && nyC.d < bestYDist) { outY = moving.y + (nyC.v - CY); bestYDist = nyC.d; }
+    if (nyB && nyB.d < bestYDist) { outY = moving.y + (nyB.v - B); bestYDist = nyB.d; }
+
+    // grid snap step (round to gridSize)
+    outX = Math.round(outX / 1) ; // we already snapped to targets
+    outY = Math.round(outY / 1);
+
+    // clamp width/height to integers
+    const outW = Math.max(1, Math.round(moving.width));
+    const outH = Math.max(1, Math.round(moving.height));
+
+    return clampRect({ ...moving, x: outX, y: outY, width: outW, height: outH });
+  }
+
+  function clampRect(r) {
+    const w = Math.max(1, Math.round(r.width));
+    const h = Math.max(1, Math.round(r.height));
+    let x = Math.round(r.x), y = Math.round(r.y);
+    x = Math.max(0, Math.min(x, canvasW - w));
+    y = Math.max(0, Math.min(y, canvasH - h));
+    return { ...r, x, y, width: w, height: h };
+  }
+
+  /* ---------- Guides (visual) ---------- */
+  function removeGuides() {
+    const gs = frameBox.querySelectorAll('.guide-v, .guide-h');
+    gs.forEach(n => n.remove());
+  }
+  function showGuides(rect) {
+    removeGuides();
+    const pxs = [rect.x, rect.x + rect.width / 2, rect.x + rect.width, canvasW / 2];
+    const pys = [rect.y, rect.y + rect.height / 2, rect.y + rect.height, canvasH / 2];
+    pxs.forEach(px => {
+      const v = document.createElement('div'); v.className = 'guide-v'; v.style.left = (px) + 'px'; v.style.top = '0px'; v.style.bottom = '0px';
+      v.style.position = 'absolute'; v.style.width = '1px'; v.style.background = '#60a5fa'; v.style.opacity = '0.9';
+      frameBox.appendChild(v);
+    });
+    pys.forEach(py => {
+      const h = document.createElement('div'); h.className = 'guide-h'; h.style.top = (py) + 'px'; h.style.left = '0px'; h.style.right = '0px';
+      h.style.position = 'absolute'; h.style.height = '1px'; h.style.background = '#60a5fa'; h.style.opacity = '0.9';
+      frameBox.appendChild(h);
+    });
+  }
+
+  /* ---------- Text editing (overlay) ---------- */
+  function startTextEdit(layer) {
+    if (!layer) return;
+    editingId = layer.id;
+    // create textarea overlay
+    const ta = document.createElement('textarea');
+    ta.className = 'editing';
+    ta.value = layer.text || '';
+    ta.style.position = 'absolute';
+    ta.style.left = (layer.x) + 'px';
+    ta.style.top = (layer.y) + 'px';
+    ta.style.width = layer.width + 'px';
+    ta.style.height = layer.height + 'px';
+    ta.style.fontSize = (layer.fontSize || 18) + 'px';
+    ta.style.lineHeight = (layer.lineHeight || 1.3);
+    ta.style.textAlign = layer.align || 'center';
+    if (loadedFontName) ta.style.fontFamily = `"${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+
+    canvasInner.appendChild(ta);
+    ta.focus();
+
+    function commit() {
+      layer.text = ta.value;
+      editingId = null;
+      canvasInner.removeChild(ta);
+      renderCanvas();
+    }
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
+    });
+    ta.addEventListener('blur', commit);
+  }
+
+  /* ---------- Toolbar (Word-like) ---------- */
+  function updateToolbarVisibility() {
+    const layer = layers.find(l => l.id === selectedId);
+    if (layer && layer.type === 'text') {
+      toolbar.style.display = 'block';
+      // fill toolbar values
+      tbSize.value = layer.fontSize || 22;
+      tbColor.value = layer.color || '#111111';
+      // font select: try to set loadedFontName if present
+      if (loadedFontName) {
+        // ensure option exists
+        if (![...fontSelect.options].some(o => o.value === loadedFontName)) addFontOption(loadedFontName, loadedFontName);
+        fontSelect.value = loadedFontName;
+      } else fontSelect.value = '';
+      // button states:
+      tbBold.classList.toggle('active', !!layer.bold);
+      tbItalic.classList.toggle('active', !!layer.italic);
+      tbUnderline.classList.toggle('active', !!layer.underline);
+    } else {
+      toolbar.style.display = 'none';
+    }
+  }
+
+  function toggleTool(kind) {
+    const layer = layers.find(l => l.id === selectedId);
+    if (!layer || layer.type !== 'text') return;
+    if (kind === 'bold') layer.bold = !layer.bold;
+    if (kind === 'italic') layer.italic = !layer.italic;
+    if (kind === 'underline') layer.underline = !layer.underline;
+    renderCanvas();
+  }
+
+  function setAlignment(align) {
+    const layer = layers.find(l => l.id === selectedId);
+    if (!layer || layer.type !== 'text') return;
+    layer.align = align;
+    renderCanvas();
+  }
+
+  function applyToolbar() {
+    const layer = layers.find(l => l.id === selectedId);
+    if (!layer || layer.type !== 'text') return;
+    layer.fontSize = parseInt(tbSize.value) || layer.fontSize || 18;
+    layer.color = tbColor.value || layer.color;
+    const chosenFont = fontSelect.value;
+    if (chosenFont) loadedFontName = chosenFont; // set applied font name
+    renderCanvas();
+  }
+
+  function addFontOption(name, value) {
+    if ([...fontSelect.options].some(o => o.value === value)) return;
+    const o = document.createElement('option'); o.value = value; o.textContent = name; fontSelect.appendChild(o);
+  }
+
+  /* ---------- Font upload ---------- */
+  async function onFontFile(e) {
+    const f = e.target.files[0];
+    if (!f) return;
+    const name = f.name.split('.').slice(0, -1).join('-') || 'UploadedFont';
+    const url = URL.createObjectURL(f);
+    try {
+      const font = new FontFace(name, `url(${url})`);
+      await font.load();
+      document.fonts.add(font);
+      loadedFontName = name;
+      addFontOption(name, name);
+      alert('フォントを読み込みました: ' + name + '\nツールバーで選択してください。');
+      renderCanvas();
+    } catch (err) {
+      console.error(err);
+      alert('フォントの読み込みに失敗しました。');
+    }
+    e.target.value = '';
+  }
+
+  /* ---------- Export: offscreen canvas (no handles) ---------- */
+  async function exportImage(format = 'png', scale = 2) {
+    const W = Math.round(canvasW * scale), H = Math.round(canvasH * scale);
+    const cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+
+    for (const l of layers) {
+      if (!l.visible) continue;
+      if (l.type === 'photo') {
+        await new Promise(res => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => { ctx.drawImage(img, l.x * scale, l.y * scale, l.width * scale, l.height * scale); res(); };
+          img.onerror = () => res();
+          img.src = l.url;
+        });
+      } else if (l.type === 'text') {
+        ctx.save();
+        const size = Math.round((l.fontSize || 18) * scale);
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = l.color || '#000';
+        // draw first line with bold/firstLine option
+        const paras = (l.text || '').split('\n');
+        // prepare fonts
+        if (loadedFontName) {
+          ctx.font = `${l.bold ? '700' : '400'} ${size}px "${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+        } else {
+          ctx.font = `${l.bold ? '700' : '400'} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+        }
+        // draw wrapped centered
+        const maxW = l.width * scale;
+        let y = l.y * scale;
+        const lh = Math.round(size * (l.lineHeight || 1.2));
+        for (let i = 0; i < paras.length; i++) {
+          const txt = paras[i];
+          // if not first line and italic flag set, set font accordingly
+          if (i === 0) {
+            // first line: bold if l.boldFirstLine or l.bold
+            if (loadedFontName) ctx.font = `${(l.boldFirstLine || l.bold) ? '700' : (l.bold ? '700' : '400')} ${size}px "${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+            else ctx.font = `${(l.boldFirstLine || l.bold) ? '700' : (l.bold ? '700' : '400')} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+          } else {
+            if (loadedFontName) ctx.font = `${l.bold ? '700' : '400'} ${size}px "${loadedFontName}", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+            else ctx.font = `${l.bold ? '700' : '400'} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial`;
+          }
+          // measure and wrap
+          const words = txt.split(' ');
+          let line = '';
+          for (const w of words) {
+            const test = line ? (line + ' ' + w) : w;
+            if (ctx.measureText(test).width > maxW && line) {
+              const lw = ctx.measureText(line).width;
+              ctx.fillText(line, l.x * scale + (maxW - lw) / 2, y);
+              line = w; y += lh;
+            } else {
+              line = test;
+            }
+          }
+          if (line) {
+            const lw = ctx.measureText(line).width;
+            ctx.fillText(line, l.x * scale + (maxW - lw) / 2, y);
+            y += lh;
+          }
+        }
+        ctx.restore();
+      }
+    }
+
+    const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
+    const q = format === 'png' ? 1 : 0.95;
+    const data = cvs.toDataURL(mime, q);
+    const a = document.createElement('a'); a.href = data; a.download = `frame_export.${format}`; a.click();
+  }
+
+  /* ---------- utilities ---------- */
+  function selectLayer(id) { selectedId = id; updateToolbarVisibility(); renderCanvas(); }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+  function setPreset(key) {
+    setPresetInternal(key);
+  }
+  function setPresetInternal(key) {
+    const p = PRESETS.find(x => x.key === key);
+    if (!p) return;
+    canvasW = p.w; canvasH = p.h;
+    updateScale();
+    layers = layers.map(l => computeSnapRect(l));
+    renderCanvas();
+  }
+
+  // updateScale wrapper for inner functions
+  function updateScale() { updateScaleInternal(); }
+
+  function updateScaleInternal() {
+    const maxW = Math.round(window.innerWidth * 0.72);
+    const maxH = Math.round(window.innerHeight * 0.78);
+    displayScale = Math.min(1, maxW / canvasW, maxH / canvasH) || 1;
+    frameBox.style.width = (canvasW * displayScale) + 'px';
+    frameBox.style.height = (canvasH * displayScale) + 'px';
+    canvasInner.style.width = canvasW + 'px';
+    canvasInner.style.height = canvasH + 'px';
+    canvasInner.style.transform = `scale(${displayScale})`;
+    canvasInfo.textContent = `キャンバス — ${canvasW} × ${canvasH} (表示 ${Math.round(displayScale * 100)}%)`;
+  }
+
+  /* ---------- expose some debug helpers on window for testing ---------- */
+  window._layers = () => layers;
+  window._select = (id) => { selectedId = id; renderCanvas(); };
+
+  // initialize
+  init();
+
+})(); // end IIFE
+
+</script>
 </body>
 </html>
