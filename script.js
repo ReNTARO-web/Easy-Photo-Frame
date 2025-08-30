@@ -5,14 +5,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const snapGuides = document.getElementById('snapGuides');
     const layerList = document.getElementById('layerList');
 
-    let layers = []; // すべてのレイヤーを管理する配列
+    let layers = [];
     let activeLayer = null;
 
     // --- 1. レイヤー管理とアクティブ化 ---
     const activateLayer = (layerElement) => {
         if (activeLayer) {
             activeLayer.classList.remove('active');
-            // テキストレイヤーの場合、編集不可にする
             if (activeLayer.classList.contains('text-layer')) {
                 activeLayer.setAttribute('contenteditable', 'false');
             }
@@ -31,30 +30,51 @@ document.addEventListener('DOMContentLoaded', () => {
             if (layer === activeLayer) {
                 li.classList.add('active');
             }
-
             const layerName = layer.dataset.name || `レイヤー ${layers.length - index}`;
             li.textContent = layerName;
             li.addEventListener('click', () => {
                 activateLayer(layer);
             });
-            layerList.prepend(li); // 新しいレイヤーをリストの先頭に追加
+            layerList.prepend(li);
         });
     };
 
-    // --- 2. 画像のアップロードと初期設定 ---
+    // --- 2. 画像のアップロードとフレーム追加 ---
     imageUpload.addEventListener('change', (event) => {
         const file = event.target.files[0];
         if (file) {
             const reader = new FileReader();
             reader.onload = (e) => {
-                const imageWrapper = document.getElementById('imageWrapper');
-                const uploadedImage = document.getElementById('uploadedImage');
-                uploadedImage.src = e.target.result;
-                uploadedImage.onload = () => {
-                    imageWrapper.style.display = 'block';
+                const image = new Image();
+                image.src = e.target.result;
+                image.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    const frameRatio = 1.2; // フレームの縦横比を調整
+                    canvas.width = image.width * frameRatio;
+                    canvas.height = image.height * frameRatio;
+                    
+                    // 白いフレームを描画
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // 中央に画像を描画
+                    const imageX = (canvas.width - image.width) / 2;
+                    const imageY = (canvas.height - image.height) / 2;
+                    ctx.drawImage(image, imageX, imageY);
+                    
+                    const framedImage = document.createElement('img');
+                    framedImage.src = canvas.toDataURL('image/jpeg');
+                    framedImage.id = 'frameImage';
+                    
+                    const imageFrame = document.createElement('div');
+                    imageFrame.classList.add('layer', 'image-frame');
+                    imageFrame.appendChild(framedImage);
+                    
                     const containerWidth = canvasContainer.offsetWidth;
                     const containerHeight = canvasContainer.offsetHeight;
-                    const imgRatio = uploadedImage.naturalWidth / uploadedImage.naturalHeight;
+                    const imgRatio = framedImage.naturalWidth / framedImage.naturalHeight;
                     const containerRatio = containerWidth / containerHeight;
                     let newWidth, newHeight;
                     if (imgRatio > containerRatio) {
@@ -64,31 +84,57 @@ document.addEventListener('DOMContentLoaded', () => {
                         newHeight = containerHeight * 0.8;
                         newWidth = newHeight * imgRatio;
                     }
-                    imageWrapper.style.width = `${newWidth}px`;
-                    imageWrapper.style.height = `${newHeight}px`;
-                    imageWrapper.style.left = `${(containerWidth - newWidth) / 2}px`;
-                    imageWrapper.style.top = `${(containerHeight - newHeight) / 2}px`;
+                    imageFrame.style.width = `${newWidth}px`;
+                    imageFrame.style.height = `${newHeight}px`;
+                    imageFrame.style.left = `${(containerWidth - newWidth) / 2}px`;
+                    imageFrame.style.top = `${(containerHeight - newHeight) / 2}px`;
+                    
+                    canvasContainer.appendChild(imageFrame);
+                    layers.push(imageFrame);
+                    imageFrame.dataset.name = '画像';
+                    activateLayer(imageFrame);
 
-                    layers.push(imageWrapper);
-                    imageWrapper.dataset.name = '画像';
-                    activateLayer(imageWrapper);
+                    // EXIF情報の読み取りとテキスト追加
+                    EXIF.getData(image, function() {
+                        const exifData = EXIF.getAllTags(this);
+                        const textData = formatExifData(exifData);
+                        addText(textData, imageFrame.offsetLeft, imageFrame.offsetTop + imageFrame.offsetHeight);
+                    });
                 };
             };
             reader.readAsDataURL(file);
         }
     });
 
+    const formatExifData = (data) => {
+        let text = '';
+        if (data.Make && data.Model) {
+            text += `カメラ: ${data.Make} ${data.Model}\n`;
+        }
+        if (data.FocalLength) {
+            text += `焦点距離: ${data.FocalLength}mm\n`;
+        }
+        if (data.FNumber) {
+            text += `絞り: f/${data.FNumber}\n`;
+        }
+        if (data.ISOSpeedRatings) {
+            text += `ISO感度: ${data.ISOSpeedRatings}\n`;
+        }
+        if (data.ExposureTime) {
+            text += `シャッタースピード: ${data.ExposureTime}s\n`;
+        }
+        return text.trim();
+    };
+
     // --- 3. テキストの追加 ---
-    addTextButton.addEventListener('click', () => {
+    const addText = (initialText = 'テキストを入力', x = 100, y = 100) => {
         const textLayer = document.createElement('div');
         textLayer.classList.add('layer', 'text-layer');
         textLayer.setAttribute('contenteditable', 'true');
-        textLayer.textContent = 'テキストを入力';
-        textLayer.style.left = '50%';
-        textLayer.style.top = '50%';
-        textLayer.style.transform = 'translate(-50%, -50%)'; // 中央に配置
-
-        // リサイズハンドルをテキストレイヤーに追加
+        textLayer.textContent = initialText;
+        textLayer.style.left = `${x}px`;
+        textLayer.style.top = `${y}px`;
+        
         const handles = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
         handles.forEach(className => {
             const handle = document.createElement('div');
@@ -101,7 +147,9 @@ document.addEventListener('DOMContentLoaded', () => {
         textLayer.dataset.name = `テキスト ${layers.filter(l => l.classList.contains('text-layer')).length}`;
         activateLayer(textLayer);
         textLayer.focus();
-    });
+    };
+    
+    addTextButton.addEventListener('click', () => addText());
 
     // --- 4. ドラッグ、リサイズ、アクティブ化のイベント管理 ---
     let isDragging = false;
@@ -130,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
             initialHeight = targetLayer.offsetHeight;
             initialX = e.clientX;
             initialY = e.clientY;
-            e.preventDefault(); // ドラッグが開始しないように
+            e.preventDefault();
             return;
         }
         
@@ -165,7 +213,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 newHeight = initialHeight + dy;
             }
 
-            // 最小サイズを設定
             if (newWidth > 50 && newHeight > 50) {
                 activeLayer.style.width = `${newWidth}px`;
                 activeLayer.style.height = `${newHeight}px`;
