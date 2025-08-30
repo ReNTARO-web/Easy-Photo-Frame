@@ -11,10 +11,11 @@
         <header>
             <h1>画像エディタ</h1>
             <input type="file" id="imageUpload" accept="image/*">
+            <button id="addTextButton">テキストを追加</button>
         </header>
         <main id="editorContainer">
             <div id="canvasContainer">
-                <div id="imageWrapper" style="display: none;">
+                <div id="imageWrapper" class="layer" style="display: none;">
                     <img id="uploadedImage" src="#" alt="アップロードされた画像">
                     <div class="resize-handle top-left"></div>
                     <div class="resize-handle top-right"></div>
@@ -27,11 +28,11 @@
                 </div>
             </div>
             <aside id="sidebar">
-                <h2>設定</h2>
+                <h2>レイヤー</h2>
+                <ul id="layerList"></ul>
             </aside>
         </main>
     </div>
-
     <script src="script.js"></script>
 </body>
 </html>
