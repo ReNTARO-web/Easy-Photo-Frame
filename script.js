@@ -1,104 +1,159 @@
-/* ベーススタイル */
-body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background-color: #f0f2f5;
-    color: #333;
-}
+document.addEventListener('DOMContentLoaded', () => {
+    const imageUpload = document.getElementById('imageUpload');
+    const canvasContainer = document.getElementById('canvasContainer');
+    const imageWrapper = document.getElementById('imageWrapper');
+    const uploadedImage = document.getElementById('uploadedImage');
+    const snapGuides = document.getElementById('snapGuides');
 
-#app {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-}
+    let currentLayer = null;
+    let isDragging = false;
+    let isResizing = false;
+    let resizeHandle = null;
+    let initialX, initialY, initialWidth, initialHeight;
 
-header {
-    background-color: #ffffff;
-    padding: 10px 20px;
-    border-bottom: 1px solid #ddd;
-    display: flex;
-    align-items: center;
-    gap: 20px;
-}
+    // --- 1. 画像のアップロードと初期設定 ---
+    imageUpload.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                uploadedImage.src = e.target.result;
+                uploadedImage.onload = () => {
+                    imageWrapper.style.display = 'block';
+                    // 画像の初期サイズをコンテナの80%に設定
+                    const containerWidth = canvasContainer.offsetWidth;
+                    const containerHeight = canvasContainer.offsetHeight;
+                    const imgRatio = uploadedImage.naturalWidth / uploadedImage.naturalHeight;
+                    const containerRatio = containerWidth / containerHeight;
 
-#editorContainer {
-    display: flex;
-    flex-grow: 1;
-    background-color: #f8f9fa;
-}
+                    let newWidth, newHeight;
+                    if (imgRatio > containerRatio) {
+                        newWidth = containerWidth * 0.8;
+                        newHeight = newWidth / imgRatio;
+                    } else {
+                        newHeight = containerHeight * 0.8;
+                        newWidth = newHeight * imgRatio;
+                    }
 
-#canvasContainer {
-    flex-grow: 1;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
-    position: relative;
-    background-color: #e9ecef;
-    border: 1px dashed #ccc;
-    margin: 20px;
-}
+                    imageWrapper.style.width = `${newWidth}px`;
+                    imageWrapper.style.height = `${newHeight}px`;
+                    imageWrapper.style.left = `${(containerWidth - newWidth) / 2}px`;
+                    imageWrapper.style.top = `${(containerHeight - newHeight) / 2}px`;
 
-#sidebar {
-    width: 250px;
-    background-color: #ffffff;
-    border-left: 1px solid #ddd;
-    padding: 20px;
-    box-shadow: -2px 0 5px rgba(0,0,0,0.05);
-}
+                    currentLayer = imageWrapper;
+                    updateSnapGuides();
+                };
+            };
+            reader.readAsDataURL(file);
+        }
+    });
 
-/* 画像とハンドルをラップするコンテナ */
-#imageWrapper {
-    position: absolute;
-    cursor: grab;
-    border: 1px solid blue; /* 選択時の枠線 */
-}
+    // --- 2. ドラッグ機能 ---
+    imageWrapper.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('resize-handle')) {
+            isResizing = true;
+            resizeHandle = e.target;
+            initialWidth = imageWrapper.offsetWidth;
+            initialHeight = imageWrapper.offsetHeight;
+            initialX = e.clientX;
+            initialY = e.clientY;
+            return;
+        }
 
-#uploadedImage {
-    display: block;
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
+        isDragging = true;
+        initialX = e.clientX - imageWrapper.offsetLeft;
+        initialY = e.clientY - imageWrapper.offsetTop;
+        imageWrapper.style.cursor = 'grabbing';
+    });
 
-/* リサイズハンドル */
-.resize-handle {
-    position: absolute;
-    width: 12px;
-    height: 12px;
-    background: #007bff;
-    border: 1px solid #fff;
-    border-radius: 50%;
-    z-index: 200;
-}
+    // --- 3. リサイズ機能 ---
+    canvasContainer.addEventListener('mousemove', (e) => {
+        if (isResizing) {
+            const dx = e.clientX - initialX;
+            const dy = e.clientY - initialY;
 
-.top-left { top: -6px; left: -6px; cursor: nwse-resize; }
-.top-right { top: -6px; right: -6px; cursor: nesw-resize; }
-.bottom-left { bottom: -6px; left: -6px; cursor: nesw-resize; }
-.bottom-right { bottom: -6px; right: -6px; cursor: nwse-resize; }
+            let newWidth = initialWidth;
+            let newHeight = initialHeight;
 
-/* スナップガイド */
-#snapGuides {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-}
+            if (resizeHandle.classList.contains('top-left')) {
+                newWidth = initialWidth - dx;
+                newHeight = initialHeight - dy;
+                imageWrapper.style.left = `${imageWrapper.offsetLeft + dx}px`;
+                imageWrapper.style.top = `${imageWrapper.offsetTop + dy}px`;
+            } else if (resizeHandle.classList.contains('top-right')) {
+                newWidth = initialWidth + dx;
+                newHeight = initialHeight - dy;
+                imageWrapper.style.top = `${imageWrapper.offsetTop + dy}px`;
+            } else if (resizeHandle.classList.contains('bottom-left')) {
+                newWidth = initialWidth - dx;
+                newHeight = initialHeight + dy;
+                imageWrapper.style.left = `${imageWrapper.offsetLeft + dx}px`;
+            } else if (resizeHandle.classList.contains('bottom-right')) {
+                newWidth = initialWidth + dx;
+                newHeight = initialHeight + dy;
+            }
 
-.snap-line {
-    background-color: rgba(255, 0, 0, 0.5);
-    position: absolute;
-    z-index: 1000;
-}
+            // 縦横比を維持
+            const newRatio = newWidth / newHeight;
+            const originalRatio = initialWidth / initialHeight;
+            if (Math.abs(newRatio - originalRatio) > 0.1) {
+                if (newWidth / initialWidth > newHeight / initialHeight) {
+                    newHeight = newWidth / originalRatio;
+                } else {
+                    newWidth = newHeight * originalRatio;
+                }
+            }
 
-.snap-line.horizontal {
-    width: 100%;
-    height: 1px;
-}
+            // 最小サイズを設定
+            if (newWidth > 50 && newHeight > 50) {
+                imageWrapper.style.width = `${newWidth}px`;
+                imageWrapper.style.height = `${newHeight}px`;
+                updateSnapGuides();
+            }
+            return;
+        }
 
-.snap-line.vertical {
-    width: 1px;
-    height: 100%;
-}
+        if (!isDragging) return;
+
+        const newX = e.clientX - initialX;
+        const newY = e.clientY - initialY;
+
+        imageWrapper.style.left = `${newX}px`;
+        imageWrapper.style.top = `${newY}px`;
+        updateSnapGuides();
+    });
+
+    // --- 4. ドラッグとリサイズ終了 ---
+    canvasContainer.addEventListener('mouseup', () => {
+        isDragging = false;
+        isResizing = false;
+        imageWrapper.style.cursor = 'grab';
+    });
+
+    // --- 5. スナップガイドの更新 ---
+    const updateSnapGuides = () => {
+        if (!currentLayer || currentLayer.style.display === 'none') {
+            snapGuides.style.display = 'none';
+            return;
+        }
+
+        const layerRect = currentLayer.getBoundingClientRect();
+        const containerRect = canvasContainer.getBoundingClientRect();
+
+        // レイヤーの中央座標を計算 (canvasContainerに対する相対位置)
+        const layerCenterX = layerRect.left + layerRect.width / 2 - containerRect.left;
+        const layerCenterY = layerRect.top + layerRect.height / 2 - containerRect.top;
+
+        const horizontalGuide = snapGuides.querySelector('.snap-line.horizontal');
+        const verticalGuide = snapGuides.querySelector('.snap-line.vertical');
+
+        if (horizontalGuide && verticalGuide) {
+            horizontalGuide.style.top = `${layerCenterY}px`;
+            verticalGuide.style.left = `${layerCenterX}px`;
+            snapGuides.style.display = 'block';
+        }
+    };
+
+    // ウィンドウサイズ変更時にスナップガイドを更新
+    window.addEventListener('resize', updateSnapGuides);
+});
