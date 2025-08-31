@@ -107,6 +107,10 @@
         .hidden-layer {
             display: none;
         }
+        /* ★ 変更点: 背景レイヤーに視覚的なガイドとなる点線枠を追加 */
+        .background-layer {
+            border: 1px dashed #a0aec0 !important; /* !importantで選択時の枠線を上書き */
+        }
     </style>
 </head>
 <body class="bg-gray-100 flex h-screen overflow-hidden">
@@ -657,10 +661,8 @@
                             const tags = EXIF.getAllTags(this);
                             const cameraMake = tags.Make;
                             const cameraModel = tags.Model;
-                            // ★ 変更点: tags.LensType を追加して、より多くの形式のレンズ情報を取得できるようにしました。
                             let lensModel = tags.LensModel || tags.LensInfo || tags.LensType;
                             
-                            // EXIFデータからレンズモデルを探すための追加ロジック
                             if (!lensModel) {
                                 for (const key in tags) {
                                     if (key.includes('Lens') && typeof tags[key] === 'string' && tags[key].length > 0) {
@@ -685,7 +687,6 @@
 
                             let currentY = imageHeight + 10;
                             
-                            // カメラ・レンズ名テキストレイヤー
                             const cameraNameLayer = document.createElement('div');
                             cameraNameLayer.classList.add('draggable', 'text-layer');
                             cameraNameLayer.dataset.type = 'text';
@@ -702,7 +703,6 @@
                             groupElement.appendChild(cameraNameLayer);
                             currentY += 25;
 
-                            // 撮影情報テキストレイヤー
                             const detailLayer = document.createElement('div');
                             detailLayer.classList.add('draggable', 'text-layer');
                             detailLayer.dataset.type = 'text';
@@ -821,6 +821,12 @@
                     
                     layers.forEach(layer => {
                         const clonedLayer = layer.cloneNode(true);
+                        
+                        // ★ 変更点: 書き出す際に背景レイヤーのガイド枠を非表示にする
+                        if (clonedLayer.classList.contains('background-layer')) {
+                            clonedLayer.style.border = 'none';
+                        }
+
                         const layerRect = layer.getBoundingClientRect();
                         const backgroundRect = backgroundLayer.getBoundingClientRect();
                         clonedLayer.style.left = `${layerRect.left - backgroundRect.left}px`;
@@ -843,6 +849,12 @@
                     
                     layers.forEach(layer => {
                         const clonedLayer = layer.cloneNode(true);
+
+                        // ★ 変更点: (背景がない場合も念のため) ガイド枠を非表示にする
+                        if (clonedLayer.classList.contains('background-layer')) {
+                            clonedLayer.style.border = 'none';
+                        }
+                        
                         clonedLayer.style.left = `${layer.offsetLeft - minX}px`;
                         clonedLayer.style.top = `${layer.offsetTop - minY}px`;
                         tempCanvasContainer.appendChild(clonedLayer);
