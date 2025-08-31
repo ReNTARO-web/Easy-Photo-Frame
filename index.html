@@ -92,6 +92,9 @@
         .image-layer img {
             pointer-events: none;
         }
+         .remove-border {
+            border: none !important;
+        }
         .hide-border {
             border: none !important;
         }
@@ -804,12 +807,11 @@
                 activeLayer = null;
                 updateLayersList();
 
-                const backgroundLayer = document.querySelector('.background-layer');
-                
-                // ★ 修正箇所1：ダウンロード処理前に、画面上の背景レイヤーの点線を非表示にする
-                if (backgroundLayer) {
-                    backgroundLayer.style.border = 'none';
-                }
+                  const backgroundLayer = document.querySelector('.background-layer');
+                  // ★ 修正1：html2canvasでキャプチャする前に、新しいクラスを追加して枠線を非表示にする// 
+                  if (backgroundLayer) {
+                      backgroundLayer.classList.add('remove-border');
+                    }
                 
                 const tempCanvasContainer = document.createElement('div');
                 tempCanvasContainer.style.position = 'fixed';
@@ -867,22 +869,23 @@
                     });
                 }
                 
-                html2canvas(tempCanvasContainer, {
+                 // html2canvas(tempCanvasContainer, ...
+                 html2canvas(tempCanvasContainer, {
                     scale: 2,
                     backgroundColor: null
-                }).then(canvas => {
-                    const link = document.createElement('a');
+                 }).then(canvas => {
+                     const link = document.createElement('a');
                     link.download = `frame.${format === 'image/jpeg' ? 'jpeg' : 'png'}`;
                     link.href = canvas.toDataURL(format);
                     link.click();
-                    document.body.removeChild(tempCanvasContainer);
+                     document.body.removeChild(tempCanvasContainer);
                     
-                    // ★ 修正箇所2：ダウンロード完了後に、元の点線に戻す
-                    if (backgroundLayer) {
-                        backgroundLayer.style.border = '';
-                    }
-                });
-            };
+                     // ★ 修正2：ダウンロード完了後に、クラスを削除して元の枠線に戻す
+                     if (backgroundLayer) {
+                         backgroundLayer.classList.remove('remove-border');
+        }
+    });
+};
 
             const getSnapPosition = (x, y) => {
                 const snappedX = snapToGrid(x);
