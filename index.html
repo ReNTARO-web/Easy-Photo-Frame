@@ -92,6 +92,9 @@
         .image-layer img {
             pointer-events: none;
         }
+        .hide-border {
+            border: none !important;
+        }
         .download-modal {
             position: fixed;
             top: 0;
@@ -795,91 +798,95 @@
             });
 
             const downloadImage = (format) => {
-    selectedLayers.forEach(l => l.classList.remove('active'));
-    selectedLayers.clear();
-    removeResizeHandles();
-    activeLayer = null;
-    updateLayersList();
+                selectedLayers.forEach(l => l.classList.remove('active'));
+                selectedLayers.clear();
+                removeResizeHandles();
+                activeLayer = null;
+                updateLayersList();
 
-    // 変更箇所（1）: html2canvasでキャプチャする前に、画面上の背景の枠線を非表示にする
-    const backgroundLayer = document.querySelector('.background-layer');
-    if (backgroundLayer) {
-        backgroundLayer.style.border = 'none';
-    }
-    
-    const tempCanvasContainer = document.createElement('div');
-    tempCanvasContainer.style.position = 'fixed';
-    tempCanvasContainer.style.top = '-9999px';
-    tempCanvasContainer.style.left = '-9999px';
-    tempCanvasContainer.style.overflow = 'hidden';
-    document.body.appendChild(tempCanvasContainer);
-    
-    const layers = Array.from(canvasContainer.children).filter(el => el.classList.contains('draggable') && !el.classList.contains('hidden-layer')).sort((a, b) => {
-        return Array.from(canvasContainer.children).indexOf(a) - Array.from(canvasContainer.children).indexOf(b);
-    });
-    
-    if (backgroundLayer) {
-        const backgroundRect = backgroundLayer.getBoundingClientRect();
-        tempCanvasContainer.style.width = `${backgroundRect.width}px`;
-        tempCanvasContainer.style.height = `${backgroundRect.height}px`;
-        
-        layers.forEach(layer => {
-            const clonedLayer = layer.cloneNode(true);
-            
-            // 変更箇所（3）: この部分は元からあるコード
-            if (clonedLayer.classList.contains('background-layer')) {
-                clonedLayer.style.border = 'none';
-            }
+                const backgroundLayer = document.querySelector('.background-layer');
 
-            const layerRect = layer.getBoundingClientRect();
-            const backgroundRect = backgroundLayer.getBoundingClientRect();
-            clonedLayer.style.left = `${layerRect.left - backgroundRect.left}px`;
-            clonedLayer.style.top = `${layerRect.top - backgroundRect.top}px`;
-            tempCanvasContainer.appendChild(clonedLayer);
-        });
-        
-    } else {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        layers.forEach(layer => {
-            const rect = layer.getBoundingClientRect();
-            minX = Math.min(minX, layer.offsetLeft);
-            minY = Math.min(minY, layer.offsetTop);
-            maxX = Math.max(maxX, layer.offsetLeft + rect.width);
-            maxY = Math.max(maxY, layer.offsetTop + rect.height);
-        });
-        
-        tempCanvasContainer.style.width = `${maxX - minX}px`;
-        tempCanvasContainer.style.height = `${maxY - minY}px`;
-        
-        layers.forEach(layer => {
-            const clonedLayer = layer.cloneNode(true);
+                // ★ ここから修正
+                if (backgroundLayer) {
+                    // ダウンロード処理前に、一時的に枠線を非表示にするクラスを追加
+                    backgroundLayer.classList.add('hide-border');
+                }
+                // ★ ここまで修正
+                
+                const tempCanvasContainer = document.createElement('div');
+                tempCanvasContainer.style.position = 'fixed';
+                tempCanvasContainer.style.top = '-9999px';
+                tempCanvasContainer.style.left = '-9999px';
+                tempCanvasContainer.style.overflow = 'hidden';
+                document.body.appendChild(tempCanvasContainer);
+                
+                const layers = Array.from(canvasContainer.children).filter(el => el.classList.contains('draggable') && !el.classList.contains('hidden-layer')).sort((a, b) => {
+                    return Array.from(canvasContainer.children).indexOf(a) - Array.from(canvasContainer.children).indexOf(b);
+                });
+                
+                if (backgroundLayer) {
+                    const backgroundRect = backgroundLayer.getBoundingClientRect();
+                    tempCanvasContainer.style.width = `${backgroundRect.width}px`;
+                    tempCanvasContainer.style.height = `${backgroundRect.height}px`;
+                    
+                    layers.forEach(layer => {
+                        const clonedLayer = layer.cloneNode(true);
+                        
+                        if (clonedLayer.classList.contains('background-layer')) {
+                            clonedLayer.style.border = 'none';
+                        }
+                        
+                        const layerRect = layer.getBoundingClientRect();
+                        const backgroundRect = backgroundLayer.getBoundingClientRect();
+                        clonedLayer.style.left = `${layerRect.left - backgroundRect.left}px`;
+                        clonedLayer.style.top = `${layerRect.top - backgroundRect.top}px`;
+                        tempCanvasContainer.appendChild(clonedLayer);
+                    });
+                    
+                } else {
+                    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                    layers.forEach(layer => {
+                        const rect = layer.getBoundingClientRect();
+                        minX = Math.min(minX, layer.offsetLeft);
+                        minY = Math.min(minY, layer.offsetTop);
+                        maxX = Math.max(maxX, layer.offsetLeft + rect.width);
+                        maxY = Math.max(maxY, layer.offsetTop + rect.height);
+                    });
+                    
+                    tempCanvasContainer.style.width = `${maxX - minX}px`;
+                    tempCanvasContainer.style.height = `${maxY - minY}px`;
+                    
+                    layers.forEach(layer => {
+                        const clonedLayer = layer.cloneNode(true);
 
-            if (clonedLayer.classList.contains('background-layer')) {
-                clonedLayer.style.border = 'none';
-            }
-            
-            clonedLayer.style.left = `${layer.offsetLeft - minX}px`;
-            clonedLayer.style.top = `${layer.offsetTop - minY}px`;
-            tempCanvasContainer.appendChild(clonedLayer);
-        });
-    }
-    
-    html2canvas(tempCanvasContainer, {
-        scale: 2,
-        backgroundColor: null
-    }).then(canvas => {
-        const link = document.createElement('a');
-        link.download = `frame.${format === 'image/jpeg' ? 'jpeg' : 'png'}`;
-        link.href = canvas.toDataURL(format);
-        link.click();
-        document.body.removeChild(tempCanvasContainer);
+                        if (clonedLayer.classList.contains('background-layer')) {
+                            clonedLayer.style.border = 'none';
+                        }
+                        
+                        clonedLayer.style.left = `${layer.offsetLeft - minX}px`;
+                        clonedLayer.style.top = `${layer.offsetTop - minY}px`;
+                        tempCanvasContainer.appendChild(clonedLayer);
+                    });
+                }
+                
+                html2canvas(tempCanvasContainer, {
+                    scale: 2,
+                    backgroundColor: null
+                }).then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = `frame.${format === 'image/jpeg' ? 'jpeg' : 'png'}`;
+                    link.href = canvas.toDataURL(format);
+                    link.click();
+                    document.body.removeChild(tempCanvasContainer);
 
-        // 変更箇所（2）: ダウンロード完了後に、画面上の背景の枠線を元に戻す
-        if (backgroundLayer) {
-            backgroundLayer.style.border = '';
-        }
-    });
-};
+                    // ★ ここから修正
+                    if (backgroundLayer) {
+                        // ダウンロード完了後に、クラスを削除して元の表示に戻す
+                        backgroundLayer.classList.remove('hide-border');
+                    }
+                    // ★ ここまで修正
+                });
+            };
 
             const getSnapPosition = (x, y) => {
                 const snappedX = snapToGrid(x);
