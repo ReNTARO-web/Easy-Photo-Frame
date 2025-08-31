@@ -832,8 +832,9 @@
                     layers.forEach(layer => {
                         const clonedLayer = layer.cloneNode(true);
                         
+                        // ★ 修正箇所：元のクラスを削除することで、!importantのスタイルを確実に無効化する
                         if (clonedLayer.classList.contains('background-layer')) {
-                            clonedLayer.style.border = 'none';
+                            clonedLayer.classList.remove('background-layer');
                         }
 
                         const layerRect = layer.getBoundingClientRect();
@@ -1033,3 +1034,4 @@
     </script>
 </body>
 </html>
+
