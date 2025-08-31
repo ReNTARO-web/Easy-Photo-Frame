@@ -805,13 +805,11 @@
                 updateLayersList();
 
                 const backgroundLayer = document.querySelector('.background-layer');
-
-                // ★ ここから修正
+                
+                // ★ 修正箇所1：ダウンロード処理前に、画面上の背景レイヤーの点線を非表示にする
                 if (backgroundLayer) {
-                    // ダウンロード処理前に、一時的に枠線を非表示にするクラスを追加
-                    backgroundLayer.classList.add('hide-border');
+                    backgroundLayer.style.border = 'none';
                 }
-                // ★ ここまで修正
                 
                 const tempCanvasContainer = document.createElement('div');
                 tempCanvasContainer.style.position = 'fixed';
@@ -835,7 +833,7 @@
                         if (clonedLayer.classList.contains('background-layer')) {
                             clonedLayer.style.border = 'none';
                         }
-                        
+
                         const layerRect = layer.getBoundingClientRect();
                         const backgroundRect = backgroundLayer.getBoundingClientRect();
                         clonedLayer.style.left = `${layerRect.left - backgroundRect.left}px`;
@@ -878,13 +876,11 @@
                     link.href = canvas.toDataURL(format);
                     link.click();
                     document.body.removeChild(tempCanvasContainer);
-
-                    // ★ ここから修正
+                    
+                    // ★ 修正箇所2：ダウンロード完了後に、元の点線に戻す
                     if (backgroundLayer) {
-                        // ダウンロード完了後に、クラスを削除して元の表示に戻す
-                        backgroundLayer.classList.remove('hide-border');
+                        backgroundLayer.style.border = '';
                     }
-                    // ★ ここまで修正
                 });
             };
 
