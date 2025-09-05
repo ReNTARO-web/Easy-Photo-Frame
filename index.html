@@ -79,7 +79,8 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-size: 25px 25px;
+            background-size: 16px 16px;  /*★マス目の大きさ変更　小さくすると細かいグリッド、大きくすると粗いグリッドになります。（Javascriptの const GRID_SIZE  も同じように変更）*/
+
             background-image: linear-gradient(to right, rgba(0, 0, 0, 0.1) 1px, transparent 1px),
                               linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
             pointer-events: none;
@@ -239,7 +240,7 @@
             let selectedLayers = new Set();
             let dragStartX, dragStartY;
             let initialX, initialY, initialWidth, initialHeight, initialLeft, initialTop;
-            const GRID_SIZE = 25;
+            const GRID_SIZE = 16; // ★マス目の大きさ変更　小さくすると細かいグリッド、大きくすると粗いグリッドになります。（CSSの background-size も同じように変更）
 
             const snapToGrid = (value) => Math.round(value / GRID_SIZE) * GRID_SIZE;
             const generateId = () => `layer-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -689,25 +690,27 @@
                                 fNumber ? `F/${(fNumber.numerator / fNumber.denominator).toFixed(1)}` : '',
                                 exposureTime ? `${(exposureTime.numerator / exposureTime.denominator) >= 1 ? (exposureTime.numerator / exposureTime.denominator).toFixed(1) + 's' : `1/${Math.round(1/(exposureTime.numerator / exposureTime.denominator))}`}s` : '',
                                 iso ? `ISO ${iso}` : ''
-                            ].filter(Boolean).join(' ');
+                            ].filter(Boolean).join('  ');
 
                             let currentY = imageHeight + 10;
                             
                             const cameraNameLayer = document.createElement('div');
                             cameraNameLayer.classList.add('draggable', 'text-layer');
                             cameraNameLayer.dataset.type = 'text';
-                            cameraNameLayer.dataset.name = 'カメラ/レンズ名';
+                            cameraNameLayer.dataset.name = 'カメラ名';
                             cameraNameLayer.dataset.id = generateId();
                             cameraNameLayer.textContent = cameraAndLensText;
-                            cameraNameLayer.style.fontFamily = 'Poppins, sans-serif';
+                            cameraNameLayer.style.fontFamily = 'Noto Sans JP, sans-serif';
                             cameraNameLayer.style.fontWeight = 'bold';
+                            cameraNameLayer.style.lineHeight = '1.0'; // ★ 行間を狭くする
                             cameraNameLayer.style.position = 'absolute';
                             cameraNameLayer.style.width = '100%';
                             cameraNameLayer.style.textAlign = 'center';
                             cameraNameLayer.style.left = '0px';
                             cameraNameLayer.style.top = `${currentY}px`;
+                            cameraNameLayer.style.fontSize = '14px'; // 好きな大きさに変更
                             groupElement.appendChild(cameraNameLayer);
-                            currentY += 25;
+                            currentY += 15; // ★ ここで間隔を広げている
 
                             const detailLayer = document.createElement('div');
                             detailLayer.classList.add('draggable', 'text-layer');
@@ -717,13 +720,15 @@
                             detailLayer.textContent = detailText;
                             detailLayer.style.fontFamily = 'Roboto, sans-serif';
                             detailLayer.style.color = '#6b7280';
+                            detailLayer.style.lineHeight = '1.0'; // ★ 行間を狭くする
                             detailLayer.style.position = 'absolute';
                             detailLayer.style.width = '100%';
                             detailLayer.style.textAlign = 'center';
                             detailLayer.style.left = '0px';
                             detailLayer.style.top = `${currentY}px`;
+                            detailLayer.style.fontSize = '10px'; // 好きな大きさに変更
                             groupElement.appendChild(detailLayer);
-                            currentY += 25;
+                            currentY += 15; // ★ ここで間隔を広げている
                             
                             groupElement.style.width = `${imageWidth}px`;
                             groupElement.style.height = `${currentY}px`;
@@ -894,16 +899,27 @@
                 return { x: snappedX, y: snappedY };
             };
 
-            document.addEventListener('mousedown', (e) => {
-                const target = e.target;
+            document.addEventListener('mousedown', startInteraction);
+            document.addEventListener('touchstart', startInteraction, { passive: false });
+
+            function startInteraction(e) {
+                const isTouchEvent = e.type.startsWith('touch');
+                const event = isTouchEvent ? e.touches[0] : e;
+                const target = event.target;
+                
+                // ドラッグやリサイズ操作中に意図しないスクロールが発生しないよう、デフォルトの動作を無効化します。
+                if (target.closest('.draggable') || target.classList.contains('resize-handle')) {
+                    e.preventDefault();
+                }
+                
                 if (target.classList.contains('resize-handle')) {
                     isResizing = true;
                     resizeHandle = target.classList[1];
                     const layer = target.closest('.draggable');
                     selectLayer(layer);
                     const info = getLayerInfo(layer);
-                    initialX = e.clientX;
-                    initialY = e.clientY;
+                    initialX = event.clientX;
+                    initialY = event.clientY;
                     initialWidth = info.width;
                     initialHeight = info.height;
                     initialLeft = info.left;
@@ -920,15 +936,18 @@
                             };
                         });
                     }
-
-                    document.body.style.cursor = target.style.cursor;
+                    if (!isTouchEvent) {
+                        document.body.style.cursor = target.style.cursor;
+                    }
                 } else if (target.closest('.draggable')) {
                     const layer = target.closest('.draggable');
-                    selectLayer(layer, e.shiftKey);
+                    selectLayer(layer, false);
                     isDragging = true;
-                    dragStartX = e.clientX - layer.offsetLeft;
-                    dragStartY = e.clientY - layer.offsetTop;
-                    layer.style.cursor = 'grabbing';
+                    dragStartX = event.clientX - layer.offsetLeft;
+                    dragStartY = event.clientY - layer.offsetTop;
+                    if (!isTouchEvent) {
+                        layer.style.cursor = 'grabbing';
+                    }
                 } else if (!target.closest('.sidebar')) {
                     if (selectedLayers.size > 0) {
                         selectedLayers.forEach(l => {
@@ -946,19 +965,29 @@
                         updateGroupButtonState();
                     }
                 }
-            });
+            }
 
-            document.addEventListener('mousemove', (e) => {
+            document.addEventListener('mousemove', moveInteraction);
+            document.addEventListener('touchmove', moveInteraction, { passive: false });
+
+            function moveInteraction(e) {
+                const isTouchEvent = e.type.startsWith('touch');
+                const event = isTouchEvent ? e.touches[0] : e;
+                
                 if (isDragging && activeLayer) {
-                    const newLeft = e.clientX - dragStartX;
-                    const newTop = e.clientY - dragStartY;
+                    const newLeft = event.clientX - dragStartX;
+                    const newTop = event.clientY - dragStartY;
                     
                     const snappedPosition = getSnapPosition(newLeft, newTop);
                     activeLayer.style.left = `${snappedPosition.x}px`;
                     activeLayer.style.top = `${snappedPosition.y}px`;
+                    
+                    if (activeLayer.dataset.type === 'text') {
+                        activeLayer.contentEditable = 'false';
+                    }
                 } else if (isResizing && activeLayer) {
-                    const dx = e.clientX - initialX;
-                    const dy = e.clientY - initialY;
+                    const dx = event.clientX - initialX;
+                    const dy = event.clientY - initialY;
                     let newWidth = initialWidth;
                     let newHeight = initialHeight;
                     let newLeft = initialLeft;
@@ -1008,9 +1037,12 @@
                         });
                     }
                 }
-            });
+            }
 
-            document.addEventListener('mouseup', () => {
+            document.addEventListener('mouseup', endInteraction);
+            document.addEventListener('touchend', endInteraction);
+
+            function endInteraction() {
                 isDragging = false;
                 isResizing = false;
                 resizeHandle = null;
@@ -1018,7 +1050,7 @@
                 if (activeLayer && activeLayer.dataset.type === 'text') {
                     activeLayer.contentEditable = 'true';
                 }
-            });
+            }
             
             canvasContainer.addEventListener('dblclick', (e) => {
                 const target = e.target;
@@ -1029,9 +1061,21 @@
                     textLayer.focus();
                 }
             });
+            canvasContainer.addEventListener('touchend', (e) => {
+                const target = e.target;
+                const textLayer = target.closest('.text-layer');
+                if (textLayer) {
+                    // 短い時間内に連続してタップされたかを判定
+                    if (textLayer.lastTouchTime && (e.timeStamp - textLayer.lastTouchTime) < 300) {
+                        selectLayer(textLayer);
+                        textLayer.contentEditable = 'true';
+                        textLayer.focus();
+                    }
+                    textLayer.lastTouchTime = e.timeStamp;
+                }
+            });
 
         });
     </script>
 </body>
 </html>
-
