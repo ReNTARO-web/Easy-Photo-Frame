@@ -13,13 +13,17 @@
         body {
             font-family: 'Noto Sans JP', sans-serif;
             background-color: #f0f4f8;
+            touch-action: none; /* 全体でピンチ操作を有効化 */
         }
         #app {
             display: flex;
             height: 100vh;
+            flex-direction: column; /* スマホ向けにカラムレイアウトに */
         }
         .sidebar {
             width: 350px;
+            flex-shrink: 0;
+            transition: transform 0.3s ease-in-out;
         }
         .canvas-container {
             position: relative;
@@ -28,6 +32,9 @@
             cursor: default;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
             border: 1px solid #e2e8f0;
+            touch-action: none; /* ピンチ操作のためにタッチアクションを無効化 */
+            width: 100%;
+            height: 100%;
         }
         .draggable {
             position: absolute;
@@ -35,6 +42,7 @@
             border: 2px solid transparent;
             cursor: grab;
             transition: border-color 0.2s ease-in-out;
+            touch-action: none; /* ピンチ操作のためにタッチアクションを無効化 */
         }
         .draggable.active {
             border-color: #3b82f6;
@@ -79,8 +87,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-size: 16px 16px;  /*★マス目の大きさ変更　小さくすると細かいグリッド、大きくすると粗いグリッドになります。（Javascriptの const GRID_SIZE  も同じように変更）*/
-
+            background-size: 16px 16px;
             background-image: linear-gradient(to right, rgba(0, 0, 0, 0.1) 1px, transparent 1px),
                               linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
             pointer-events: none;
@@ -93,7 +100,7 @@
         .image-layer img {
             pointer-events: none;
         }
-         .remove-border {
+        .remove-border {
             border: none !important;
         }
         .hide-border {
@@ -118,15 +125,79 @@
         .background-layer {
             border: 1px dashed #a0aec0 !important; /* !importantで選択時の枠線を上書き */
         }
+
+        /* --- レスポンシブデザインの追加 --- */
+        @media (min-width: 1024px) {
+            #app {
+                flex-direction: row;
+            }
+            .sidebar {
+                transform: translateX(0);
+            }
+            .sidebar-toggle-btn {
+                display: none;
+            }
+        }
+
+        @media (max-width: 1023px) {
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                height: 100%;
+                z-index: 50;
+                transform: translateX(-100%);
+                box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            .canvas-container {
+                height: calc(100vh - 80px); /* ツールバーの高さ分を引く */
+            }
+            .toolbar {
+                display: flex;
+                width: 100%;
+                justify-content: space-around;
+                align-items: center;
+                height: 80px;
+                background-color: #fff;
+                box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-100 flex h-screen overflow-hidden">
-    <div id="app" class="flex w-full">
-        <div class="sidebar bg-white p-6 shadow-lg flex flex-col justify-between">
+    <div id="app" class="w-full">
+        <div class="toolbar lg:hidden fixed bottom-0 left-0 right-0 p-4 bg-white shadow-lg z-20">
+            <div class="flex justify-around items-center">
+                <button id="add-text-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
+                    <i class="fa-solid fa-font text-lg mb-1"></i>
+                    <span>テキスト</span>
+                </button>
+                <button id="upload-image-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
+                    <i class="fa-solid fa-image text-lg mb-1"></i>
+                    <span>画像</span>
+                </button>
+                <button id="show-sidebar-btn" class="flex flex-col items-center text-sm text-gray-700">
+                    <i class="fa-solid fa-sliders text-lg mb-1"></i>
+                    <span>設定</span>
+                </button>
+                <button id="download-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
+                    <i class="fa-solid fa-download text-lg mb-1"></i>
+                    <span>保存</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="sidebar" class="sidebar bg-white p-6 shadow-lg flex flex-col justify-between">
             <div>
                 <h1 class="text-3xl font-bold mb-6 text-gray-800">FRAME EDITOR</h1>
+                <button id="hide-sidebar-btn" class="lg:hidden absolute top-4 right-4 text-gray-500 hover:text-gray-700">
+                    <i class="fa-solid fa-times text-2xl"></i>
+                </button>
 
-                <div class="space-y-4 mb-6">
+                <div class="space-y-4 mb-6 hidden lg:block">
                     <button id="add-text-btn" class="w-full flex items-center justify-center p-3 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 transition duration-300 shadow-md">
                         <i class="fa-solid fa-font mr-2"></i> テキストを追加
                     </button>
@@ -144,7 +215,7 @@
 
                 <div id="text-style-section" class="mb-6 hidden">
                     <h2 class="text-lg font-semibold mb-2">テキストスタイル</h2>
-                    <div class="flex space-x-2">
+                    <div class="flex flex-wrap gap-2">
                         <button id="bold-btn" class="p-3 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
                             <i class="fa-solid fa-bold"></i>
                         </button>
@@ -186,7 +257,7 @@
                 </div>
             </div>
 
-            <div class="mt-6">
+            <div class="mt-6 hidden lg:block">
                 <button id="download-btn" class="w-full flex items-center justify-center p-3 rounded-lg bg-indigo-500 text-white font-semibold hover:bg-indigo-600 transition duration-300 shadow-md">
                     <i class="fa-solid fa-download mr-2"></i> ダウンロード
                 </button>
@@ -196,7 +267,7 @@
         <div id="canvas-wrapper" class="flex-grow flex items-center justify-center p-6 relative overflow-hidden">
             <div id="canvas-container" class="canvas-container w-full h-full relative flex items-center justify-center">
                  <div class="grid-overlay"></div>
-                </div>
+            </div>
         </div>
     </div>
 
@@ -212,12 +283,23 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            const canvasWrapper = document.getElementById('canvas-wrapper');
             const canvasContainer = document.getElementById('canvas-container');
+            const sidebar = document.getElementById('sidebar');
+            const showSidebarBtn = document.getElementById('show-sidebar-btn');
+            const hideSidebarBtn = document.getElementById('hide-sidebar-btn');
+            
             const addTextBtn = document.getElementById('add-text-btn');
             const uploadImageBtn = document.getElementById('upload-image-btn');
+            const downloadBtn = document.getElementById('download-btn');
+
+            // Mobile-specific buttons
+            const addTextBtnMobile = document.getElementById('add-text-btn-mobile');
+            const uploadImageBtnMobile = document.getElementById('upload-image-btn-mobile');
+            const downloadBtnMobile = document.getElementById('download-btn-mobile');
+
             const imageUploadInput = document.getElementById('image-upload');
             const layersList = document.getElementById('layers-list');
-            const downloadBtn = document.getElementById('download-btn');
             const aspectBtns = document.querySelectorAll('.aspect-btn');
             const colorPickerSection = document.getElementById('color-picker-section');
             const colorPickerTitle = document.getElementById('color-picker-title');
@@ -237,13 +319,30 @@
             let isResizing = false;
             let resizeHandle = null;
             let activeLayer = null;
-            let isPinching = false; // ★追加
-            let initialPinchDist = 0; // ★追加
+            let isPinching = false;
+            let initialPinchDist = 0;
             let selectedLayers = new Set();
             let dragStartX, dragStartY;
             let initialX, initialY, initialWidth, initialHeight, initialLeft, initialTop;
-            const GRID_SIZE = 16; // ★マス目の大きさ変更　小さくすると細かいグリッド、大きくすると粗いグリッドになります。（CSSの background-size も同じように変更）
+            const GRID_SIZE = 16;
+            
+            // レスポンシブ対応のキャンバスサイズ設定
+            const updateCanvasSize = () => {
+                const wrapperRect = canvasWrapper.getBoundingClientRect();
+                canvasContainer.style.width = `${wrapperRect.width}px`;
+                canvasContainer.style.height = `${wrapperRect.height}px`;
+            };
+            window.addEventListener('resize', updateCanvasSize);
+            updateCanvasSize();
 
+            showSidebarBtn.addEventListener('click', () => {
+                sidebar.classList.add('open');
+            });
+
+            hideSidebarBtn.addEventListener('click', () => {
+                sidebar.classList.remove('open');
+            });
+            
             const snapToGrid = (value) => Math.round(value / GRID_SIZE) * GRID_SIZE;
             const generateId = () => `layer-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
             const getRelativePosition = (element, parentElement) => {
@@ -255,7 +354,6 @@
                 };
             };
             
-            // 全てのレイヤーを再帰的に取得
             const getAllLayers = (parent = canvasContainer) => {
                 const layers = [];
                 const children = Array.from(parent.children).filter(el => el.classList.contains('draggable'));
@@ -268,7 +366,6 @@
                 return layers;
             };
 
-            // レイヤーリストを再帰的に更新する関数
             const updateLayersList = (parent = canvasContainer, listElement = layersList, depth = 0) => {
                 if (depth === 0) {
                     listElement.innerHTML = '';
@@ -451,7 +548,6 @@
                     }
                 }
                 
-                // Active layerは単一選択時のみ
                 if (selectedLayers.size === 1) {
                     activeLayer = [...selectedLayers][0];
                 } else {
@@ -507,10 +603,9 @@
                 }
             };
 
-            // --- ドラッグ＆リサイズ機能 ---
             const createResizeHandles = () => {
                 if (!activeLayer) return;
-                removeResizeHandles(); // 既存のハンドルを削除
+                removeResizeHandles();
                 const handles = ['tl', 'tr', 'bl', 'br'];
                 handles.forEach(pos => {
                     const handle = document.createElement('div');
@@ -563,8 +658,7 @@
                 }
             });
 
-            // --- イベントリスナー ---
-            addTextBtn.addEventListener('click', () => {
+            const addTextLayer = () => {
                 const layerId = generateId();
                 const newTextLayer = document.createElement('div');
                 newTextLayer.classList.add('draggable', 'text-layer', 'p-2', 'bg-transparent', 'text-black');
@@ -582,7 +676,10 @@
                 canvasContainer.appendChild(newTextLayer);
                 selectLayer(newTextLayer);
                 updateLayersList();
-            });
+            };
+
+            addTextBtn.addEventListener('click', addTextLayer);
+            addTextBtnMobile.addEventListener('click', addTextLayer);
 
             boldBtn.addEventListener('click', () => {
                 if (activeLayer && activeLayer.dataset.type === 'text') {
@@ -615,7 +712,10 @@
                 }
             });
 
-            uploadImageBtn.addEventListener('click', () => imageUploadInput.click());
+            const uploadImage = () => imageUploadInput.click();
+            uploadImageBtn.addEventListener('click', uploadImage);
+            uploadImageBtnMobile.addEventListener('click', uploadImage);
+
             imageUploadInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -648,14 +748,15 @@
                         imgElement.style.objectFit = 'contain';
                         imageLayer.appendChild(imgElement);
 
-                        const canvasRatio = canvasContainer.clientWidth / canvasContainer.clientHeight;
+                        const canvasRect = canvasContainer.getBoundingClientRect();
+                        const canvasRatio = canvasRect.width / canvasRect.height;
                         const imageRatio = img.naturalWidth / img.naturalHeight;
                         let imageWidth, imageHeight;
                         if (imageRatio > canvasRatio) {
-                            imageWidth = canvasContainer.clientWidth * 0.7;
+                            imageWidth = canvasRect.width * 0.7;
                             imageHeight = imageWidth / imageRatio;
                         } else {
-                            imageHeight = canvasContainer.clientHeight * 0.7;
+                            imageHeight = canvasRect.height * 0.7;
                             imageWidth = imageHeight * imageRatio;
                         }
 
@@ -704,15 +805,15 @@
                             cameraNameLayer.textContent = cameraAndLensText;
                             cameraNameLayer.style.fontFamily = 'Noto Sans JP, sans-serif';
                             cameraNameLayer.style.fontWeight = 'bold';
-                            cameraNameLayer.style.lineHeight = '1.0'; // ★ 行間を狭くする
+                            cameraNameLayer.style.lineHeight = '1.0';
                             cameraNameLayer.style.position = 'absolute';
                             cameraNameLayer.style.width = '100%';
                             cameraNameLayer.style.textAlign = 'center';
                             cameraNameLayer.style.left = '0px';
                             cameraNameLayer.style.top = `${currentY}px`;
-                            cameraNameLayer.style.fontSize = '14px'; // 好きな大きさに変更
+                            cameraNameLayer.style.fontSize = '14px';
                             groupElement.appendChild(cameraNameLayer);
-                            currentY += 15; // ★ ここで間隔を広げている
+                            currentY += 15;
 
                             const detailLayer = document.createElement('div');
                             detailLayer.classList.add('draggable', 'text-layer');
@@ -722,15 +823,15 @@
                             detailLayer.textContent = detailText;
                             detailLayer.style.fontFamily = 'Roboto, sans-serif';
                             detailLayer.style.color = '#6b7280';
-                            detailLayer.style.lineHeight = '1.0'; // ★ 行間を狭くする
+                            detailLayer.style.lineHeight = '1.0';
                             detailLayer.style.position = 'absolute';
                             detailLayer.style.width = '100%';
                             detailLayer.style.textAlign = 'center';
                             detailLayer.style.left = '0px';
                             detailLayer.style.top = `${currentY}px`;
-                            detailLayer.style.fontSize = '10px'; // 好きな大きさに変更
+                            detailLayer.style.fontSize = '10px';
                             groupElement.appendChild(detailLayer);
-                            currentY += 15; // ★ ここで間隔を広げている
+                            currentY += 15;
                             
                             groupElement.style.width = `${imageWidth}px`;
                             groupElement.style.height = `${currentY}px`;
@@ -756,8 +857,9 @@
                     const ratioStr = btn.dataset.ratio;
                     const [widthRatio, heightRatio] = ratioStr.split('/').map(Number);
                     
-                    const parentWidth = canvasContainer.clientWidth;
-                    const parentHeight = canvasContainer.clientHeight;
+                    const parentRect = canvasContainer.getBoundingClientRect();
+                    const parentWidth = parentRect.width;
+                    const parentHeight = parentRect.height;
                     const parentRatio = parentWidth / parentHeight;
                     const desiredRatio = widthRatio / heightRatio;
 
@@ -786,14 +888,18 @@
                     newBackgroundLayer.dataset.id = layerId;
                     
                     canvasContainer.prepend(newBackgroundLayer);
-                    newBackgroundLayer.style.left = `${(canvasContainer.clientWidth - newWidth) / 2}px`;
-                    newBackgroundLayer.style.top = `${(canvasContainer.clientHeight - newHeight) / 2}px`;
+                    newBackgroundLayer.style.left = `${(parentWidth - newWidth) / 2}px`;
+                    newBackgroundLayer.style.top = `${(parentHeight - newHeight) / 2}px`;
                     selectLayer(newBackgroundLayer);
                     updateLayersList();
                 });
             });
 
             downloadBtn.addEventListener('click', () => {
+                downloadModal.classList.remove('hidden');
+            });
+
+            downloadBtnMobile.addEventListener('click', () => {
                 downloadModal.classList.remove('hidden');
             });
 
@@ -814,11 +920,10 @@
                 activeLayer = null;
                 updateLayersList();
 
-                  const backgroundLayer = document.querySelector('.background-layer');
-                  // ★ 修正1：html2canvasでキャプチャする前に、新しいクラスを追加して枠線を非表示にする// 
-                  if (backgroundLayer) {
-                      backgroundLayer.classList.add('remove-border');
-                    }
+                const backgroundLayer = document.querySelector('.background-layer');
+                if (backgroundLayer) {
+                    backgroundLayer.classList.add('remove-border');
+                }
                 
                 const tempCanvasContainer = document.createElement('div');
                 tempCanvasContainer.style.position = 'fixed';
@@ -839,7 +944,6 @@
                     layers.forEach(layer => {
                         const clonedLayer = layer.cloneNode(true);
                         
-                        // ★ 修正箇所：元のクラスを削除することで、!importantのスタイルを確実に無効化
                         if (clonedLayer.classList.contains('background-layer')) {
                             clonedLayer.classList.remove('background-layer');
                         }
@@ -877,7 +981,6 @@
                     });
                 }
                 
-                 // html2canvas(tempCanvasContainer, ...
                  html2canvas(tempCanvasContainer, {
                     scale: 2,
                     backgroundColor: null
@@ -888,12 +991,11 @@
                     link.click();
                      document.body.removeChild(tempCanvasContainer);
                     
-                     // ★ 修正2：ダウンロード完了後に、クラスを削除して元の枠線に戻す
                      if (backgroundLayer) {
                          backgroundLayer.classList.remove('remove-border');
-        }
-    });
-};
+                    }
+                });
+            };
 
             const getSnapPosition = (x, y) => {
                 const snappedX = snapToGrid(x);
@@ -908,18 +1010,10 @@
                 const isTouchEvent = e.type.startsWith('touch');
                 const target = e.target;
                 
-                // ドラッグやリサイズ操作中に意図しないスクロールが発生しないよう、デフォルトの動作を無効化します。
-                // ★ 修正点: ピンチ操作中のpreventDefaultを追加
-                if (isTouchEvent && e.touches.length === 2) {
-                    e.preventDefault();
-                } else if (target.closest('.draggable') || target.classList.contains('resize-handle')) {
-                    e.preventDefault();
-                }
-
-                // ★ 修正点: ピンチ操作の検知を最優先でチェックする
                 if (isTouchEvent && e.touches.length === 2) {
                     isPinching = true;
-                    // ★ 修正点: タッチされた場所にあるレイヤーを特定する
+                    e.preventDefault();
+                    
                     const layer = target.closest('.draggable');
                     if (layer) {
                         selectLayer(layer);
@@ -928,14 +1022,25 @@
                         initialLeft = layer.offsetLeft;
                         initialTop = layer.offsetTop;
                         
+                        if (layer.dataset.type === 'group') {
+                            layer.childrenInfo = Array.from(layer.children).map(child => {
+                                return {
+                                    element: child,
+                                    initialLeft: child.offsetLeft,
+                                    initialTop: child.offsetTop,
+                                    initialWidth: child.offsetWidth,
+                                    initialHeight: child.offsetHeight
+                                };
+                            });
+                        }
+                        
                         const touch1 = e.touches[0];
                         const touch2 = e.touches[1];
                         initialPinchDist = Math.hypot(touch2.pageX - touch1.pageX, touch2.pageY - touch1.pageY);
                     }
-                    return; // ピンチ操作の場合は他の処理をスキップ
+                    return;
                 }
                 
-                // ★ 修正点: 以降はシングルタッチまたはマウス操作のロジック
                 const event = isTouchEvent ? e.touches[0] : e;
                 
                 if (target.classList.contains('resize-handle')) {
@@ -974,7 +1079,7 @@
                     if (!isTouchEvent) {
                         layer.style.cursor = 'grabbing';
                     }
-                } else if (!target.closest('.sidebar')) {
+                } else if (!target.closest('.sidebar') && !target.closest('.toolbar')) {
                     if (selectedLayers.size > 0) {
                         selectedLayers.forEach(l => {
                             l.classList.remove('active');
@@ -997,13 +1102,12 @@
             document.addEventListener('touchmove', moveInteraction, { passive: false });
 
             function moveInteraction(e) {
-                // ★ 修正点: isPinching状態を最優先でチェックする
                 if (isPinching && e.touches.length === 2 && activeLayer) {
+                    e.preventDefault();
                     const touch1 = e.touches[0];
                     const touch2 = e.touches[1];
                     const currentPinchDist = Math.hypot(touch2.pageX - touch1.pageX, touch2.pageY - touch1.pageY);
                     
-                    // ピンチイン・ピンチアウトの距離が極端に短い場合は処理をスキップ
                     if (initialPinchDist === 0) return; 
 
                     const scaleFactor = currentPinchDist / initialPinchDist;
@@ -1024,10 +1128,9 @@
                             child.element.style.top = `${child.initialTop * scaleFactor}px`;
                         });
                     }
-                    return; // ピンチ操作の場合は他の処理をスキップ
+                    return;
                 }
                 
-                // ★ 修正点: 以降はシングルタッチまたはマウス操作のロジック
                 const isTouchEvent = e.type.startsWith('touch');
                 const event = isTouchEvent ? e.touches[0] : e;
                 
@@ -1114,7 +1217,6 @@
                 const target = e.target;
                 const textLayer = target.closest('.text-layer');
                 if (textLayer) {
-                    // 短い時間内に連続してタップされたかを判定
                     if (textLayer.lastTouchTime && (e.timeStamp - textLayer.lastTouchTime) < 300) {
                         selectLayer(textLayer);
                         textLayer.contentEditable = 'true';
