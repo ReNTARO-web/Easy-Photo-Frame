@@ -13,17 +13,45 @@
         body {
             font-family: 'Noto Sans JP', sans-serif;
             background-color: #f0f4f8;
-            touch-action: none; /* 全体でピンチ操作を有効化 */
+            touch-action: none;
+            overflow: hidden;
         }
         #app {
-            display: flex;
+            display: grid;
+            grid-template-areas:
+                "header header header"
+                "sidebar canvas rightpanel";
+            grid-template-columns: 0px 1fr 350px;
+            grid-template-rows: 64px 1fr;
             height: 100vh;
-            flex-direction: column; /* スマホ向けにカラムレイアウトに */
         }
-        .sidebar {
-            width: 350px;
-            flex-shrink: 0;
-            transition: transform 0.3s ease-in-out;
+        .top-toolbar {
+            grid-area: header;
+            background-color: #ffffff;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            padding: 0 1rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+        }
+        .canvas-wrapper {
+            grid-area: canvas;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1.5rem;
+        }
+        .right-panel {
+            grid-area: rightpanel;
+            background-color: #ffffff;
+            border-left: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            padding: 1.5rem;
+            box-shadow: -1px 0 3px rgba(0, 0, 0, 0.1);
         }
         .canvas-container {
             position: relative;
@@ -32,7 +60,7 @@
             cursor: default;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
             border: 1px solid #e2e8f0;
-            touch-action: none; /* ピンチ操作のためにタッチアクションを無効化 */
+            touch-action: none;
             width: 100%;
             height: 100%;
         }
@@ -42,7 +70,7 @@
             border: 2px solid transparent;
             cursor: grab;
             transition: border-color 0.2s ease-in-out;
-            touch-action: none; /* ピンチ操作のためにタッチアクションを無効化 */
+            touch-action: none;
         }
         .draggable.active {
             border-color: #3b82f6;
@@ -121,41 +149,53 @@
         .hidden-layer {
             display: none;
         }
-        /* ★ 変更点: 背景レイヤーに視覚的なガイドとなる点線枠を追加 */
         .background-layer {
-            border: 1px dashed #a0aec0 !important; /* !importantで選択時の枠線を上書き */
+            border: 1px dashed #a0aec0 !important;
+        }
+        .numbered-button {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            padding-left: 1.5rem;
+        }
+        .numbered-button::before {
+            content: attr(data-number);
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 1rem;
+            height: 1rem;
+            background-color: #4a5568;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 0.75rem;
+            font-weight: bold;
         }
 
-        /* --- レスポンシブデザインの追加 --- */
-        @media (min-width: 1024px) {
+        /* Responsive Design */
+        @media (max-width: 1023px) {
             #app {
-                flex-direction: row;
+                grid-template-areas:
+                    "canvas"
+                    "toolbar";
+                grid-template-columns: 1fr;
+                grid-template-rows: 1fr 80px;
+                flex-direction: column;
             }
-            .sidebar {
-                transform: translateX(0);
-            }
-            .sidebar-toggle-btn {
+            .top-toolbar, .right-panel {
                 display: none;
             }
-        }
-
-        @media (max-width: 1023px) {
-            .sidebar {
-                position: fixed;
-                top: 0;
-                left: 0;
+            .canvas-wrapper {
+                grid-area: canvas;
                 height: 100%;
-                z-index: 50;
-                transform: translateX(-100%);
-                box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+                padding-bottom: 0;
             }
-            .sidebar.open {
-                transform: translateX(0);
-            }
-            .canvas-container {
-                height: calc(100vh - 80px); /* ツールバーの高さ分を引く */
-            }
-            .toolbar {
+            .mobile-toolbar {
+                grid-area: toolbar;
                 display: flex;
                 width: 100%;
                 justify-content: space-around;
@@ -163,83 +203,153 @@
                 height: 80px;
                 background-color: #fff;
                 box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+                z-index: 20;
+            }
+            .mobile-right-panel {
+                position: fixed;
+                top: 0;
+                right: 0;
+                height: 100vh;
+                width: 85%;
+                background-color: #fff;
+                z-index: 50;
+                transform: translateX(100%);
+                transition: transform 0.3s ease-in-out;
+                box-shadow: -2px 0 5px rgba(0,0,0,0.2);
+                overflow-y: auto;
+                padding: 1.5rem;
+            }
+            .mobile-right-panel.open {
+                transform: translateX(0);
             }
         }
     </style>
 </head>
 <body class="bg-gray-100 flex h-screen overflow-hidden">
     <div id="app" class="w-full">
-        <div class="toolbar lg:hidden fixed bottom-0 left-0 right-0 p-4 bg-white shadow-lg z-20">
-            <div class="flex justify-around items-center">
-                <button id="add-text-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
-                    <i class="fa-solid fa-font text-lg mb-1"></i>
-                    <span>テキスト</span>
-                </button>
-                <button id="upload-image-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
-                    <i class="fa-solid fa-image text-lg mb-1"></i>
-                    <span>画像</span>
-                </button>
-                <button id="show-sidebar-btn" class="flex flex-col items-center text-sm text-gray-700">
-                    <i class="fa-solid fa-sliders text-lg mb-1"></i>
-                    <span>設定</span>
-                </button>
-                <button id="download-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
-                    <i class="fa-solid fa-download text-lg mb-1"></i>
-                    <span>保存</span>
+        <div class="top-toolbar">
+            <h1 class="text-xl font-bold text-gray-800 mr-8">FRAME EDITOR</h1>
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-2">
+                    <span class="text-sm font-semibold text-gray-600">1. 背景</span>
+                    <div class="flex gap-1">
+                        <button class="aspect-btn p-1.5 rounded-md border-2 border-gray-300 text-xs font-medium transition duration-300 hover:bg-gray-200" data-ratio="16/9">16:9</button>
+                        <button class="aspect-btn p-1.5 rounded-md border-2 border-gray-300 text-xs font-medium transition duration-300 hover:bg-gray-200" data-ratio="9/16">9:16</button>
+                        <button class="aspect-btn p-1.5 rounded-md border-2 border-gray-300 text-xs font-medium transition duration-300 hover:bg-gray-200" data-ratio="1/1">1:1</button>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="text-sm font-semibold text-gray-600">2. 要素を追加</span>
+                    <button id="add-text-btn" class="flex items-center p-2 rounded-md bg-gray-200 text-gray-700 font-medium hover:bg-gray-300 transition duration-300">
+                        <i class="fa-solid fa-font text-sm mr-1"></i>テキスト
+                    </button>
+                    <button id="upload-image-btn" class="flex items-center p-2 rounded-md bg-gray-200 text-gray-700 font-medium hover:bg-gray-300 transition duration-300">
+                        <i class="fa-solid fa-image text-sm mr-1"></i>画像
+                    </button>
+                    <input type="file" id="image-upload" class="hidden" accept="image/*">
+                </div>
+            </div>
+            <div class="flex-grow flex justify-end">
+                 <button id="download-btn" class="numbered-button flex items-center p-2 rounded-md bg-blue-500 text-white font-semibold hover:bg-blue-600 transition duration-300" data-number="3">
+                    <i class="fa-solid fa-download mr-2"></i> ダウンロード
                 </button>
             </div>
         </div>
 
-        <div id="sidebar" class="sidebar bg-white p-6 shadow-lg flex flex-col justify-between">
-            <div>
-                <h1 class="text-3xl font-bold mb-6 text-gray-800">FRAME EDITOR</h1>
-                <button id="hide-sidebar-btn" class="lg:hidden absolute top-4 right-4 text-gray-500 hover:text-gray-700">
-                    <i class="fa-solid fa-times text-2xl"></i>
-                </button>
+        <div class="mobile-toolbar fixed bottom-0 left-0 right-0 p-4 bg-white shadow-lg z-20 hidden">
+            <button id="add-text-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
+                <i class="fa-solid fa-font text-lg mb-1"></i>
+                <span>テキスト</span>
+            </button>
+            <button id="upload-image-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
+                <i class="fa-solid fa-image text-lg mb-1"></i>
+                <span>画像</span>
+            </button>
+            <button id="show-mobile-panel-btn" class="flex flex-col items-center text-sm text-gray-700">
+                <i class="fa-solid fa-sliders text-lg mb-1"></i>
+                <span>設定</span>
+            </button>
+            <button id="download-btn-mobile" class="flex flex-col items-center text-sm text-gray-700">
+                <i class="fa-solid fa-download text-lg mb-1"></i>
+                <span>保存</span>
+            </button>
+            <input type="file" id="image-upload-mobile" class="hidden" accept="image/*">
+        </div>
 
-                <div class="space-y-4 mb-6 hidden lg:block">
-                    <button id="add-text-btn" class="w-full flex items-center justify-center p-3 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 transition duration-300 shadow-md">
-                        <i class="fa-solid fa-font mr-2"></i> テキストを追加
-                    </button>
-                    <button id="upload-image-btn" class="w-full flex items-center justify-center p-3 rounded-lg bg-green-500 text-white font-semibold hover:bg-green-600 transition duration-300 shadow-md">
-                        <i class="fa-solid fa-image mr-2"></i> 画像をアップロード
-                    </button>
-                    <input type="file" id="image-upload" class="hidden" accept="image/*">
-                </div>
-                
-                <div class="space-y-2 mb-6">
-                    <button id="group-toggle-btn" class="w-full flex items-center justify-center p-3 rounded-lg bg-yellow-500 text-white font-semibold hover:bg-yellow-600 transition duration-300 shadow-md" disabled>
-                        <i class="fa-solid fa-layer-group mr-2"></i> グループ化
-                    </button>
-                </div>
-
-                <div id="text-style-section" class="mb-6 hidden">
-                    <h2 class="text-lg font-semibold mb-2">テキストスタイル</h2>
+        <div id="canvas-wrapper" class="canvas-wrapper">
+            <div id="canvas-container" class="canvas-container w-full h-full relative flex items-center justify-center">
+                 <div class="grid-overlay"></div>
+            </div>
+        </div>
+        
+        <div class="right-panel">
+            <div class="flex items-center mb-4 border-b border-gray-200">
+                <button id="properties-tab-btn" class="flex-1 p-2 font-semibold text-gray-700 border-b-2 border-transparent hover:border-blue-500 transition duration-300">プロパティ</button>
+                <button id="layers-tab-btn" class="flex-1 p-2 font-semibold text-gray-700 border-b-2 border-transparent hover:border-blue-500 transition duration-300">レイヤー</button>
+            </div>
+            
+            <div id="properties-panel" class="tab-content flex-grow overflow-y-auto">
+                 <div id="text-style-section" class="mb-6 hidden">
+                    <h2 class="text-lg font-semibold mb-2 text-gray-800">テキスト</h2>
                     <div class="flex flex-wrap gap-2">
-                        <button id="bold-btn" class="p-3 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
+                        <button id="bold-btn" class="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
                             <i class="fa-solid fa-bold"></i>
                         </button>
-                        <button id="align-left-btn" class="p-3 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
+                        <button id="align-left-btn" class="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
                             <i class="fa-solid fa-align-left"></i>
                         </button>
-                        <button id="align-center-btn" class="p-3 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
+                        <button id="align-center-btn" class="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
                             <i class="fa-solid fa-align-center"></i>
                         </button>
-                        <button id="align-right-btn" class="p-3 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
+                        <button id="align-right-btn" class="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
                             <i class="fa-solid fa-align-right"></i>
                         </button>
                     </div>
                 </div>
 
                 <div id="color-picker-section" class="mb-6 hidden">
-                    <h2 class="text-lg font-semibold mb-2" id="color-picker-title">色変更</h2>
+                    <h2 class="text-lg font-semibold mb-2 text-gray-800" id="color-picker-title">色</h2>
                     <div class="flex items-center space-x-2">
                         <input type="color" id="color-picker" value="#000000" class="w-12 h-12 p-1 border-2 border-gray-300 rounded-md cursor-pointer">
                         <div id="color-preview" class="w-24 h-8 rounded-md border border-gray-300"></div>
                     </div>
                 </div>
+                
+                 <div id="group-section" class="mb-6 hidden">
+                    <h2 class="text-lg font-semibold mb-2 text-gray-800">レイヤー操作</h2>
+                    <button id="group-toggle-btn" class="w-full flex items-center justify-center p-3 rounded-lg bg-yellow-500 text-white font-semibold hover:bg-yellow-600 transition duration-300 shadow-md" disabled>
+                        <i class="fa-solid fa-layer-group mr-2"></i> グループ化
+                    </button>
+                </div>
+                 <p id="no-selection-message" class="text-center text-gray-500 mt-10">レイヤーを選択してください</p>
+            </div>
+            
+            <div id="layers-panel" class="tab-content flex-grow overflow-y-auto hidden">
+                <ul id="layers-list" class="bg-gray-100 p-2 rounded-lg min-h-full"></ul>
+            </div>
+        </div>
 
-                <div class="mb-6">
+        <div id="mobile-panel" class="mobile-right-panel hidden">
+            <button id="hide-mobile-panel-btn" class="absolute top-4 right-4 text-gray-500 hover:text-gray-700 z-10">
+                <i class="fa-solid fa-times text-2xl"></i>
+            </button>
+            <h1 class="text-2xl font-bold mb-4">設定</h1>
+            <div class="flex items-center mb-4 border-b border-gray-200">
+                <button id="properties-tab-btn-mobile" class="flex-1 p-2 font-semibold text-gray-700 border-b-2 border-transparent hover:border-blue-500 transition duration-300">プロパティ</button>
+                <button id="layers-tab-btn-mobile" class="flex-1 p-2 font-semibold text-gray-700 border-b-2 border-transparent hover:border-blue-500 transition duration-300">レイヤー</button>
+            </div>
+            
+            <div id="properties-panel-mobile" class="tab-content flex-grow overflow-y-auto">
+                 <div class="space-y-4 mb-6">
+                    <button id="add-text-btn-full" class="w-full flex items-center justify-center p-3 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 transition duration-300 shadow-md">
+                        <i class="fa-solid fa-font mr-2"></i> テキストを追加
+                    </button>
+                    <button id="upload-image-btn-full" class="w-full flex items-center justify-center p-3 rounded-lg bg-green-500 text-white font-semibold hover:bg-green-600 transition duration-300 shadow-md">
+                        <i class="fa-solid fa-image mr-2"></i> 画像をアップロード
+                    </button>
+                    <input type="file" id="image-upload-full" class="hidden" accept="image/*">
+                </div>
+                 <div class="mb-6">
                     <h2 class="text-lg font-semibold mb-2">背景の追加</h2>
                     <div class="grid grid-cols-3 gap-2">
                         <button class="aspect-btn p-2 rounded-lg border-2 border-gray-300 text-sm font-medium transition duration-300 hover:bg-gray-200" data-ratio="16/9">16:9</button>
@@ -249,26 +359,43 @@
                         <button class="aspect-btn p-2 rounded-lg border-2 border-gray-300 text-sm font-medium transition duration-300 hover:bg-gray-200" data-ratio="1/1">1:1</button>
                     </div>
                 </div>
-
-                <div>
-                    <h2 class="text-lg font-semibold mb-2">レイヤー</h2>
-                    <ul id="layers-list" class="bg-gray-100 p-2 rounded-lg max-h-60 overflow-y-auto">
-                        </ul>
+                 <div id="text-style-section-mobile" class="mb-6 hidden">
+                    <h2 class="text-lg font-semibold mb-2 text-gray-800">テキスト</h2>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="bold-btn-mobile" class="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
+                            <i class="fa-solid fa-bold"></i>
+                        </button>
+                        <button id="align-left-btn-mobile" class="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
+                            <i class="fa-solid fa-align-left"></i>
+                        </button>
+                        <button id="align-center-btn-mobile" class="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
+                            <i class="fa-solid fa-align-center"></i>
+                        </button>
+                        <button id="align-right-btn-mobile" class="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-300">
+                            <i class="fa-solid fa-align-right"></i>
+                        </button>
+                    </div>
                 </div>
+                 <div id="color-picker-section-mobile" class="mb-6 hidden">
+                    <h2 class="text-lg font-semibold mb-2 text-gray-800" id="color-picker-title-mobile">色</h2>
+                    <div class="flex items-center space-x-2">
+                        <input type="color" id="color-picker-mobile" value="#000000" class="w-12 h-12 p-1 border-2 border-gray-300 rounded-md cursor-pointer">
+                        <div id="color-preview-mobile" class="w-24 h-8 rounded-md border border-gray-300"></div>
+                    </div>
+                </div>
+                 <div id="group-section-mobile" class="mb-6 hidden">
+                    <h2 class="text-lg font-semibold mb-2 text-gray-800">レイヤー操作</h2>
+                    <button id="group-toggle-btn-mobile" class="w-full flex items-center justify-center p-3 rounded-lg bg-yellow-500 text-white font-semibold hover:bg-yellow-600 transition duration-300 shadow-md" disabled>
+                        <i class="fa-solid fa-layer-group mr-2"></i> グループ化
+                    </button>
+                </div>
+                 <p id="no-selection-message-mobile" class="text-center text-gray-500 mt-10">レイヤーを選択してください</p>
             </div>
-
-            <div class="mt-6 hidden lg:block">
-                <button id="download-btn" class="w-full flex items-center justify-center p-3 rounded-lg bg-indigo-500 text-white font-semibold hover:bg-indigo-600 transition duration-300 shadow-md">
-                    <i class="fa-solid fa-download mr-2"></i> ダウンロード
-                </button>
+            <div id="layers-panel-mobile" class="tab-content flex-grow overflow-y-auto hidden">
+                <ul id="layers-list-mobile" class="bg-gray-100 p-2 rounded-lg min-h-full"></ul>
             </div>
         </div>
 
-        <div id="canvas-wrapper" class="flex-grow flex items-center justify-center p-6 relative overflow-hidden">
-            <div id="canvas-container" class="canvas-container w-full h-full relative flex items-center justify-center">
-                 <div class="grid-overlay"></div>
-            </div>
-        </div>
     </div>
 
     <div id="download-modal" class="download-modal hidden">
@@ -285,21 +412,32 @@
         document.addEventListener('DOMContentLoaded', () => {
             const canvasWrapper = document.getElementById('canvas-wrapper');
             const canvasContainer = document.getElementById('canvas-container');
-            const sidebar = document.getElementById('sidebar');
-            const showSidebarBtn = document.getElementById('show-sidebar-btn');
-            const hideSidebarBtn = document.getElementById('hide-sidebar-btn');
-            
+            const rightPanel = document.querySelector('.right-panel');
+            const mobilePanel = document.getElementById('mobile-panel');
+            const showMobilePanelBtn = document.getElementById('show-mobile-panel-btn');
+            const hideMobilePanelBtn = document.getElementById('hide-mobile-panel-btn');
+
             const addTextBtn = document.getElementById('add-text-btn');
+            const addTextBtnMobile = document.getElementById('add-text-btn-full');
             const uploadImageBtn = document.getElementById('upload-image-btn');
-            const downloadBtn = document.getElementById('download-btn');
-
-            // Mobile-specific buttons
-            const addTextBtnMobile = document.getElementById('add-text-btn-mobile');
-            const uploadImageBtnMobile = document.getElementById('upload-image-btn-mobile');
-            const downloadBtnMobile = document.getElementById('download-btn-mobile');
-
+            const uploadImageBtnMobile = document.getElementById('upload-image-btn-full');
             const imageUploadInput = document.getElementById('image-upload');
+            const imageUploadInputMobile = document.getElementById('image-upload-mobile');
+            const downloadBtn = document.getElementById('download-btn');
+            const downloadBtnMobile = document.getElementById('download-btn-mobile');
+            
+            const propertiesTabBtn = document.getElementById('properties-tab-btn');
+            const layersTabBtn = document.getElementById('layers-tab-btn');
+            const propertiesPanel = document.getElementById('properties-panel');
+            const layersPanel = document.getElementById('layers-panel');
+            const propertiesTabBtnMobile = document.getElementById('properties-tab-btn-mobile');
+            const layersTabBtnMobile = document.getElementById('layers-tab-btn-mobile');
+            const propertiesPanelMobile = document.getElementById('properties-panel-mobile');
+            const layersPanelMobile = document.getElementById('layers-panel-mobile');
+            
             const layersList = document.getElementById('layers-list');
+            const layersListMobile = document.getElementById('layers-list-mobile');
+            
             const aspectBtns = document.querySelectorAll('.aspect-btn');
             const colorPickerSection = document.getElementById('color-picker-section');
             const colorPickerTitle = document.getElementById('color-picker-title');
@@ -314,6 +452,22 @@
             const downloadPngBtn = document.getElementById('download-png');
             const downloadJpegBtn = document.getElementById('download-jpeg');
             const groupToggleButton = document.getElementById('group-toggle-btn');
+            const groupSection = document.getElementById('group-section');
+            const noSelectionMessage = document.getElementById('no-selection-message');
+            
+            const colorPickerSectionMobile = document.getElementById('color-picker-section-mobile');
+            const colorPickerTitleMobile = document.getElementById('color-picker-title-mobile');
+            const colorPickerMobile = document.getElementById('color-picker-mobile');
+            const colorPreviewMobile = document.getElementById('color-preview-mobile');
+            const textStyleSectionMobile = document.getElementById('text-style-section-mobile');
+            const boldBtnMobile = document.getElementById('bold-btn-mobile');
+            const alignLeftBtnMobile = document.getElementById('align-left-btn-mobile');
+            const alignCenterBtnMobile = document.getElementById('align-center-btn-mobile');
+            const alignRightBtnMobile = document.getElementById('align-right-btn-mobile');
+            const groupToggleButtonMobile = document.getElementById('group-toggle-btn-mobile');
+            const groupSectionMobile = document.getElementById('group-section-mobile');
+            const noSelectionMessageMobile = document.getElementById('no-selection-message-mobile');
+
 
             let isDragging = false;
             let isResizing = false;
@@ -326,7 +480,34 @@
             let initialX, initialY, initialWidth, initialHeight, initialLeft, initialTop;
             const GRID_SIZE = 16;
             
-            // レスポンシブ対応のキャンバスサイズ設定
+            const setPanelTab = (tabName, isMobile = false) => {
+                const propsTab = isMobile ? propertiesTabBtnMobile : propertiesTabBtn;
+                const layersTab = isMobile ? layersTabBtnMobile : layersTabBtn;
+                const propsPanel = isMobile ? propertiesPanelMobile : propertiesPanel;
+                const layersPanel = isMobile ? layersPanelMobile : layersPanel;
+
+                propsTab.classList.remove('border-blue-500');
+                layersTab.classList.remove('border-blue-500');
+                propsPanel.classList.add('hidden');
+                layersPanel.classList.add('hidden');
+
+                if (tabName === 'properties') {
+                    propsTab.classList.add('border-blue-500');
+                    propsPanel.classList.remove('hidden');
+                } else if (tabName === 'layers') {
+                    layersTab.classList.add('border-blue-500');
+                    layersPanel.classList.remove('hidden');
+                }
+            };
+
+            propertiesTabBtn.addEventListener('click', () => setPanelTab('properties'));
+            layersTabBtn.addEventListener('click', () => setPanelTab('layers'));
+            propertiesTabBtnMobile.addEventListener('click', () => setPanelTab('properties', true));
+            layersTabBtnMobile.addEventListener('click', () => setPanelTab('layers', true));
+
+            setPanelTab('properties');
+            setPanelTab('properties', true);
+
             const updateCanvasSize = () => {
                 const wrapperRect = canvasWrapper.getBoundingClientRect();
                 canvasContainer.style.width = `${wrapperRect.width}px`;
@@ -335,25 +516,17 @@
             window.addEventListener('resize', updateCanvasSize);
             updateCanvasSize();
 
-            showSidebarBtn.addEventListener('click', () => {
-                sidebar.classList.add('open');
+            showMobilePanelBtn.addEventListener('click', () => {
+                mobilePanel.classList.add('open');
             });
 
-            hideSidebarBtn.addEventListener('click', () => {
-                sidebar.classList.remove('open');
+            hideMobilePanelBtn.addEventListener('click', () => {
+                mobilePanel.classList.remove('open');
             });
-            
+
             const snapToGrid = (value) => Math.round(value / GRID_SIZE) * GRID_SIZE;
             const generateId = () => `layer-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            const getRelativePosition = (element, parentElement) => {
-                const parentRect = parentElement.getBoundingClientRect();
-                const elementRect = element.getBoundingClientRect();
-                return {
-                    left: elementRect.left - parentRect.left,
-                    top: elementRect.top - parentRect.top
-                };
-            };
-            
+
             const getAllLayers = (parent = canvasContainer) => {
                 const layers = [];
                 const children = Array.from(parent.children).filter(el => el.classList.contains('draggable'));
@@ -366,9 +539,11 @@
                 return layers;
             };
 
-            const updateLayersList = (parent = canvasContainer, listElement = layersList, depth = 0) => {
+            const updateLayersList = (parent = canvasContainer, listElement, depth = 0) => {
                 if (depth === 0) {
-                    listElement.innerHTML = '';
+                    layersList.innerHTML = '';
+                    layersListMobile.innerHTML = '';
+                    listElement = layersList;
                 }
                 const children = Array.from(parent.children).filter(el => el.classList.contains('draggable')).reverse();
                 children.forEach(child => {
@@ -377,7 +552,12 @@
                     if (selectedLayers.has(child)) {
                         listItem.classList.add('active');
                     }
-                    listElement.appendChild(listItem);
+                    if (listElement === layersList) {
+                        layersList.appendChild(listItem.cloneNode(true));
+                    }
+                    if (listElement === layersListMobile) {
+                        layersListMobile.appendChild(listItem.cloneNode(true));
+                    }
 
                     if (child.dataset.type === 'group') {
                         const nestedList = document.createElement('ul');
@@ -386,8 +566,25 @@
                         listItem.appendChild(nestedList);
                     }
                 });
-            };
 
+                if (depth === 0) {
+                    const pcListItems = layersList.querySelectorAll('.layer-item');
+                    const mobileListItems = layersListMobile.querySelectorAll('.layer-item');
+                    pcListItems.forEach(item => {
+                         item.addEventListener('click', (e) => {
+                            const layer = document.querySelector(`[data-id="${item.dataset.id}"]`);
+                            if (layer) selectLayer(layer, e.shiftKey);
+                        });
+                    });
+                    mobileListItems.forEach(item => {
+                         item.addEventListener('click', (e) => {
+                            const layer = document.querySelector(`[data-id="${item.dataset.id}"]`);
+                            if (layer) selectLayer(layer, e.shiftKey);
+                        });
+                    });
+                }
+            };
+            
             const createLayerListItem = (layerElement) => {
                 const layerId = layerElement.dataset.id;
                 const layerType = layerElement.dataset.type;
@@ -430,17 +627,14 @@
                     </div>
                 `;
 
-                listItem.addEventListener('click', (e) => {
-                    if (e.target.closest('.layer-actions')) return;
-                    selectLayer(layerElement, e.shiftKey);
-                });
-
                 listItem.querySelector('.toggle-visibility-btn').addEventListener('click', (e) => {
                     e.stopPropagation();
                     const isVisible = !layerElement.classList.toggle('hidden-layer');
                     e.currentTarget.dataset.visible = isVisible;
                     e.currentTarget.innerHTML = `<i class="fa-solid fa-${isVisible ? 'eye' : 'eye-slash'}"></i>`;
                     listItem.classList.toggle('opacity-50', !isVisible);
+                    updateLayersList(canvasContainer, layersList);
+                    updateLayersList(canvasContainer, layersListMobile);
                 });
 
                 listItem.querySelector('.delete-layer-btn').addEventListener('click', (e) => {
@@ -452,12 +646,13 @@
                         activeLayer = null;
                     }
                     updateGroupButtonState();
-                    updateLayersList();
+                    updateLayersList(canvasContainer, layersList);
+                    updateLayersList(canvasContainer, layersListMobile);
                 });
                 
                 return listItem;
             };
-            
+
             const groupLayers = (layersToGroup) => {
                 if (layersToGroup.size < 2) return;
                 
@@ -491,7 +686,8 @@
 
                 canvasContainer.appendChild(groupElement);
                 selectLayer(groupElement);
-                updateLayersList();
+                updateLayersList(canvasContainer, layersList);
+                updateLayersList(canvasContainer, layersListMobile);
             };
 
             const ungroupLayers = (groupElement) => {
@@ -512,7 +708,8 @@
                 selectedLayers.clear();
                 activeLayer = null;
                 updateGroupButtonState();
-                updateLayersList();
+                updateLayersList(canvasContainer, layersList);
+                updateLayersList(canvasContainer, layersListMobile);
             };
 
             const selectLayer = (layer, multiSelect = false) => {
@@ -560,46 +757,78 @@
                         l.contentEditable = 'true';
                     }
                 });
+                
+                const updateUIForLayer = (isMobile) => {
+                    const tsSection = isMobile ? textStyleSectionMobile : textStyleSection;
+                    const cpSection = isMobile ? colorPickerSectionMobile : colorPickerSection;
+                    const cpTitle = isMobile ? colorPickerTitleMobile : colorPickerTitle;
+                    const cp = isMobile ? colorPickerMobile : colorPicker;
+                    const cpPrev = isMobile ? colorPreviewMobile : colorPreview;
+                    const groupSection = isMobile ? groupSectionMobile : groupSection;
+                    const noSelMsg = isMobile ? noSelectionMessageMobile : noSelectionMessage;
 
+                    if (activeLayer) {
+                        noSelMsg.classList.add('hidden');
+                        if (activeLayer.dataset.type === 'text') {
+                            tsSection.classList.remove('hidden');
+                            cpSection.classList.remove('hidden');
+                            cpTitle.textContent = 'テキストの色';
+                            cp.value = rgbToHex(activeLayer.style.color) || '#000000';
+                            cpPrev.style.backgroundColor = cp.value;
+                            activeLayer.contentEditable = 'true';
+                            activeLayer.focus();
+                        } else if (activeLayer.dataset.type === 'background') {
+                            tsSection.classList.add('hidden');
+                            cpSection.classList.remove('hidden');
+                            cpTitle.textContent = '背景の色';
+                            cp.value = rgbToHex(activeLayer.style.backgroundColor) || '#ffffff';
+                            cpPrev.style.backgroundColor = cp.value;
+                        } else {
+                            tsSection.classList.add('hidden');
+                            cpSection.classList.add('hidden');
+                        }
+                    } else {
+                        tsSection.classList.add('hidden');
+                        cpSection.classList.add('hidden');
+                        noSelMsg.classList.remove('hidden');
+                    }
+                };
+
+                updateUIForLayer(false);
+                updateUIForLayer(true);
+                
                 if (activeLayer) {
                     createResizeHandles();
-                    if (activeLayer.dataset.type === 'text') {
-                        textStyleSection.classList.remove('hidden');
-                        colorPickerSection.classList.remove('hidden');
-                        colorPickerTitle.textContent = 'テキストの色';
-                        colorPicker.value = rgbToHex(activeLayer.style.color) || '#000000';
-                        colorPreview.style.backgroundColor = colorPicker.value;
-                        activeLayer.contentEditable = 'true';
-                        activeLayer.focus();
-                    } else if (activeLayer.dataset.type === 'background') {
-                        textStyleSection.classList.add('hidden');
-                        colorPickerSection.classList.remove('hidden');
-                        colorPickerTitle.textContent = '背景の色';
-                        colorPicker.value = rgbToHex(activeLayer.style.backgroundColor) || '#ffffff';
-                        colorPreview.style.backgroundColor = colorPicker.value;
-                    } else {
-                        textStyleSection.classList.add('hidden');
-                        colorPickerSection.classList.add('hidden');
-                    }
                 } else {
                     removeResizeHandles();
-                    textStyleSection.classList.add('hidden');
-                    colorPickerSection.classList.add('hidden');
                 }
+
                 updateGroupButtonState();
-                updateLayersList();
+                updateLayersList(canvasContainer, layersList);
+                updateLayersList(canvasContainer, layersListMobile);
             };
 
             const updateGroupButtonState = () => {
-                if (selectedLayers.size >= 2) {
-                    groupToggleButton.disabled = false;
-                    groupToggleButton.innerHTML = `<i class="fa-solid fa-layer-group mr-2"></i> グループ化`;
-                } else if (selectedLayers.size === 1 && [...selectedLayers][0].dataset.type === 'group') {
-                    groupToggleButton.disabled = false;
-                    groupToggleButton.innerHTML = `<i class="fa-solid fa-object-ungroup mr-2"></i> グループ解除`;
+                const updateButton = (btn, btnMobile, isGroup) => {
+                    if (selectedLayers.size >= 2) {
+                        btn.disabled = false;
+                        btn.innerHTML = `<i class="fa-solid fa-layer-group mr-2"></i> グループ化`;
+                    } else if (selectedLayers.size === 1 && isGroup) {
+                        btn.disabled = false;
+                        btn.innerHTML = `<i class="fa-solid fa-object-ungroup mr-2"></i> グループ解除`;
+                    } else {
+                        btn.disabled = true;
+                        btn.innerHTML = `<i class="fa-solid fa-layer-group mr-2"></i> グループ化`;
+                    }
+                };
+
+                const isGroupSelected = selectedLayers.size === 1 && [...selectedLayers][0].dataset.type === 'group';
+                if (window.innerWidth > 1023) {
+                    groupSection.classList.remove('hidden');
+                    updateButton(groupToggleButton, null, isGroupSelected);
                 } else {
-                    groupToggleButton.disabled = true;
-                    groupToggleButton.innerHTML = `<i class="fa-solid fa-layer-group mr-2"></i> グループ化`;
+                    groupSectionMobile.classList.remove('hidden');
+                    updateButton(groupToggleButtonMobile, null, isGroupSelected);
                 }
             };
 
@@ -645,9 +874,11 @@
                 return '#' + parts.join('');
             };
 
-            colorPicker.addEventListener('input', (e) => {
+            const handleColorInput = (e) => {
+                const isMobile = e.target === colorPickerMobile;
                 const newColor = e.target.value;
-                colorPreview.style.backgroundColor = newColor;
+                const cpPrev = isMobile ? colorPreviewMobile : colorPreview;
+                cpPrev.style.backgroundColor = newColor;
 
                 if (activeLayer) {
                     if (activeLayer.dataset.type === 'text') {
@@ -656,7 +887,9 @@
                         activeLayer.style.backgroundColor = newColor;
                     }
                 }
-            });
+            };
+            colorPicker.addEventListener('input', handleColorInput);
+            colorPickerMobile.addEventListener('input', handleColorInput);
 
             const addTextLayer = () => {
                 const layerId = generateId();
@@ -675,49 +908,50 @@
                 newTextLayer.innerText = '新しいテキスト';
                 canvasContainer.appendChild(newTextLayer);
                 selectLayer(newTextLayer);
-                updateLayersList();
+                updateLayersList(canvasContainer, layersList);
+                updateLayersList(canvasContainer, layersListMobile);
             };
 
             addTextBtn.addEventListener('click', addTextLayer);
             addTextBtnMobile.addEventListener('click', addTextLayer);
 
-            boldBtn.addEventListener('click', () => {
+            const handleBold = () => {
                 if (activeLayer && activeLayer.dataset.type === 'text') {
                     const isBold = activeLayer.style.fontWeight === 'bold' || activeLayer.style.fontWeight === '700';
                     activeLayer.style.fontWeight = isBold ? 'normal' : 'bold';
                 }
-            });
-
-            groupToggleButton.addEventListener('click', () => {
+            };
+            boldBtn.addEventListener('click', handleBold);
+            boldBtnMobile.addEventListener('click', handleBold);
+            
+            const handleGroupToggle = () => {
                 if (selectedLayers.size >= 2) {
                     groupLayers(selectedLayers);
                 } else if (selectedLayers.size === 1 && [...selectedLayers][0].dataset.type === 'group') {
                     ungroupLayers([...selectedLayers][0]);
                 }
-            });
+            };
+            groupToggleButton.addEventListener('click', handleGroupToggle);
+            groupToggleButtonMobile.addEventListener('click', handleGroupToggle);
 
-            alignLeftBtn.addEventListener('click', () => {
-                if (activeLayer && activeLayer.dataset.type === 'text') {
-                    activeLayer.style.textAlign = 'left';
-                }
-            });
-            alignCenterBtn.addEventListener('click', () => {
-                if (activeLayer && activeLayer.dataset.type === 'text') {
-                    activeLayer.style.textAlign = 'center';
-                }
-            });
-            alignRightBtn.addEventListener('click', () => {
-                if (activeLayer && activeLayer.dataset.type === 'text') {
-                    activeLayer.style.textAlign = 'right';
-                }
-            });
+            const handleAlignLeft = () => { if (activeLayer && activeLayer.dataset.type === 'text') { activeLayer.style.textAlign = 'left'; } };
+            const handleAlignCenter = () => { if (activeLayer && activeLayer.dataset.type === 'text') { activeLayer.style.textAlign = 'center'; } };
+            const handleAlignRight = () => { if (activeLayer && activeLayer.dataset.type === 'text') { activeLayer.style.textAlign = 'right'; } };
+            alignLeftBtn.addEventListener('click', handleAlignLeft);
+            alignCenterBtn.addEventListener('click', handleAlignCenter);
+            alignRightBtn.addEventListener('click', handleAlignRight);
+            alignLeftBtnMobile.addEventListener('click', handleAlignLeft);
+            alignCenterBtnMobile.addEventListener('click', handleAlignCenter);
+            alignRightBtnMobile.addEventListener('click', handleAlignRight);
 
-            const uploadImage = () => imageUploadInput.click();
-            uploadImageBtn.addEventListener('click', uploadImage);
-            uploadImageBtnMobile.addEventListener('click', uploadImage);
+            const uploadImage = (input) => input.click();
+            uploadImageBtn.addEventListener('click', () => uploadImage(imageUploadInput));
+            uploadImageBtnMobile.addEventListener('click', () => uploadImage(imageUploadInputMobile));
+            
+            imageUploadInput.addEventListener('change', (e) => handleImageUpload(e.target.files[0]));
+            imageUploadInputMobile.addEventListener('change', (e) => handleImageUpload(e.target.files[0]));
 
-            imageUploadInput.addEventListener('change', (e) => {
-                const file = e.target.files[0];
+            const handleImageUpload = (file) => {
                 if (!file) return;
 
                 const reader = new FileReader();
@@ -844,13 +1078,14 @@
                             groupElement.style.top = `${snapToGrid(centerY)}px`;
                             
                             selectLayer(groupElement);
-                            updateLayersList();
+                            updateLayersList(canvasContainer, layersList);
+                            updateLayersList(canvasContainer, layersListMobile);
                         });
                     };
                     img.src = event.target.result;
                 };
                 reader.readAsDataURL(file);
-            });
+            };
 
             aspectBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -891,17 +1126,14 @@
                     newBackgroundLayer.style.left = `${(parentWidth - newWidth) / 2}px`;
                     newBackgroundLayer.style.top = `${(parentHeight - newHeight) / 2}px`;
                     selectLayer(newBackgroundLayer);
-                    updateLayersList();
+                    updateLayersList(canvasContainer, layersList);
+                    updateLayersList(canvasContainer, layersListMobile);
                 });
             });
 
-            downloadBtn.addEventListener('click', () => {
-                downloadModal.classList.remove('hidden');
-            });
-
-            downloadBtnMobile.addEventListener('click', () => {
-                downloadModal.classList.remove('hidden');
-            });
+            const showDownloadModal = () => downloadModal.classList.remove('hidden');
+            downloadBtn.addEventListener('click', showDownloadModal);
+            downloadBtnMobile.addEventListener('click', showDownloadModal);
 
             downloadPngBtn.addEventListener('click', () => {
                 downloadImage('image/png');
@@ -918,7 +1150,8 @@
                 selectedLayers.clear();
                 removeResizeHandles();
                 activeLayer = null;
-                updateLayersList();
+                updateLayersList(canvasContainer, layersList);
+                updateLayersList(canvasContainer, layersListMobile);
 
                 const backgroundLayer = document.querySelector('.background-layer');
                 if (backgroundLayer) {
@@ -1017,26 +1250,34 @@
                     const layer = target.closest('.draggable');
                     if (layer) {
                         selectLayer(layer);
-                        initialWidth = layer.offsetWidth;
-                        initialHeight = layer.offsetHeight;
-                        initialLeft = layer.offsetLeft;
-                        initialTop = layer.offsetTop;
                         
-                        if (layer.dataset.type === 'group') {
-                            layer.childrenInfo = Array.from(layer.children).map(child => {
-                                return {
-                                    element: child,
-                                    initialLeft: child.offsetLeft,
-                                    initialTop: child.offsetTop,
-                                    initialWidth: child.offsetWidth,
-                                    initialHeight: child.offsetHeight
-                                };
-                            });
+                        if (activeLayer) {
+                            initialWidth = activeLayer.offsetWidth;
+                            initialHeight = activeLayer.offsetHeight;
+                            initialLeft = activeLayer.offsetLeft;
+                            initialTop = activeLayer.offsetTop;
+                            
+                            if (activeLayer.dataset.type === 'group') {
+                                activeLayer.childrenInfo = Array.from(activeLayer.children).map(child => {
+                                    return {
+                                        element: child,
+                                        initialLeft: child.offsetLeft,
+                                        initialTop: child.offsetTop,
+                                        initialWidth: child.offsetWidth,
+                                        initialHeight: child.offsetHeight
+                                    };
+                                });
+                            }
+                        } else {
+                            isPinching = false;
+                            return;
                         }
                         
                         const touch1 = e.touches[0];
                         const touch2 = e.touches[1];
                         initialPinchDist = Math.hypot(touch2.pageX - touch1.pageX, touch2.pageY - touch1.pageY);
+                    } else {
+                        isPinching = false;
                     }
                     return;
                 }
@@ -1079,7 +1320,7 @@
                     if (!isTouchEvent) {
                         layer.style.cursor = 'grabbing';
                     }
-                } else if (!target.closest('.sidebar') && !target.closest('.toolbar')) {
+                } else if (!target.closest('.right-panel') && !target.closest('.top-toolbar') && !target.closest('.mobile-toolbar') && !target.closest('.mobile-right-panel')) {
                     if (selectedLayers.size > 0) {
                         selectedLayers.forEach(l => {
                             l.classList.remove('active');
@@ -1091,8 +1332,14 @@
                         removeResizeHandles();
                         activeLayer = null;
                         document.querySelectorAll('.layer-item').forEach(item => item.classList.remove('active'));
+                        noSelectionMessage.classList.remove('hidden');
                         textStyleSection.classList.add('hidden');
                         colorPickerSection.classList.add('hidden');
+                        groupSection.classList.add('hidden');
+                        noSelectionMessageMobile.classList.remove('hidden');
+                        textStyleSectionMobile.classList.add('hidden');
+                        colorPickerSectionMobile.classList.add('hidden');
+                        groupSectionMobile.classList.add('hidden');
                         updateGroupButtonState();
                     }
                 }
@@ -1115,17 +1362,26 @@
                     const newWidth = initialWidth * scaleFactor;
                     const newHeight = initialHeight * scaleFactor;
                     
+                    const layerCenterX = initialLeft + initialWidth / 2;
+                    const layerCenterY = initialTop + initialHeight / 2;
+                    
                     activeLayer.style.width = `${newWidth}px`;
                     activeLayer.style.height = `${newHeight}px`;
-                    activeLayer.style.left = `${initialLeft + (initialWidth - newWidth) / 2}px`;
-                    activeLayer.style.top = `${initialTop + (initialHeight - newHeight) / 2}px`;
+                    activeLayer.style.left = `${layerCenterX - newWidth / 2}px`;
+                    activeLayer.style.top = `${layerCenterY - newHeight / 2}px`;
 
                     if (activeLayer.dataset.type === 'group' && activeLayer.childrenInfo) {
                         activeLayer.childrenInfo.forEach(child => {
-                            child.element.style.width = `${child.initialWidth * scaleFactor}px`;
-                            child.element.style.height = `${child.initialHeight * scaleFactor}px`;
-                            child.element.style.left = `${child.initialLeft * scaleFactor}px`;
-                            child.element.style.top = `${child.initialTop * scaleFactor}px`;
+                            const childCenterX = child.initialLeft + child.initialWidth / 2;
+                            const childCenterY = child.initialTop + child.initialHeight / 2;
+                            
+                            const newChildWidth = child.initialWidth * scaleFactor;
+                            const newChildHeight = child.initialHeight * scaleFactor;
+                            
+                            child.element.style.width = `${newChildWidth}px`;
+                            child.element.style.height = `${newChildHeight}px`;
+                            child.element.style.left = `${childCenterX * scaleFactor - newChildWidth / 2}px`;
+                            child.element.style.top = `${childCenterY * scaleFactor - newChildHeight / 2}px`;
                         });
                     }
                     return;
@@ -1225,7 +1481,13 @@
                     textLayer.lastTouchTime = e.timeStamp;
                 }
             });
-
+            window.addEventListener('resize', () => {
+                 const isMobile = window.innerWidth <= 1023;
+                document.querySelector('.mobile-toolbar').style.display = isMobile ? 'flex' : 'none';
+                document.querySelector('.top-toolbar').style.display = isMobile ? 'none' : 'flex';
+                document.querySelector('.right-panel').style.display = isMobile ? 'none' : 'flex';
+            });
+            window.dispatchEvent(new Event('resize'));
         });
     </script>
 </body>
